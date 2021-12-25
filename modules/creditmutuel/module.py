@@ -64,6 +64,7 @@ class CreditMutuelModule(
         ValueTransient("resume"),
         ValueTransient("request_information"),
         ValueTransient("code", regexp=r"^\d{6}$"),
+        ValueTransient("digipass", regexp=r"^\d{8}$"),
     )
     BROWSER = CreditMutuelBrowser
 

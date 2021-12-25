@@ -17,6 +17,7 @@
 
 import re
 import time
+from base64 import b64decode
 from datetime import datetime, timedelta
 from itertools import groupby
 from operator import attrgetter
@@ -59,6 +60,7 @@ from woob.exceptions import (
     BrowserQuestion,
     BrowserUnavailable,
     BrowserUserBanned,
+    ImageQuestion,
     NeedInteractiveFor2FA,
 )
 from woob.tools.capabilities.bank.investments import create_french_liquidity
@@ -367,6 +369,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.AUTHENTICATION_METHODS = {
             "resume": self.handle_polling,
             "code": self.handle_sms,
+            "digipass": self.handle_digipass,
         }
 
     def get_expire(self):
@@ -500,6 +503,13 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 raise BrowserUserBanned(error_msg)
             raise BrowserUnavailable(error_msg)
 
+    # Duplicated from handle_sms(), very partially:
+    def handle_digipass(self):
+        if not self.otp_data or "final_url_params" not in self.otp_data:
+            raise AssertionError("Can't handle digipass without the proper data")
+        self.otp_data["final_url_params"]["otp_password"] = self.digipass
+        self.finalize_twofa(self.otp_data)
+
     def handle_sms(self):
         if not self.otp_data or "final_url_params" not in self.otp_data:
             raise BrowserIncorrectPassword("Le code de confirmation envoyé par SMS n'est plus utilisable")
@@ -569,7 +579,13 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         self.get_current_sub_bank(force=True)
 
         if self.digipass_page.is_here():
-            raise AuthMethodNotImplemented("La validation OTP par DIGIPASS n'est pas supportée.")
+            image = self.page.get_digipass_image()
+
+            # Make sure we are ready to fill in the form:
+            self.otp_data = self.page.get_otp_data()
+            assert self.otp_data, "Can't proceed to DIGIPASS handling if no otp_data"
+
+            raise ImageQuestion("digipass", image["mime_type"], b64decode(image["b64_data"]), self.page.get_message())
 
         if self.mobile_confirmation.is_here():
             self.page.check_bypass()

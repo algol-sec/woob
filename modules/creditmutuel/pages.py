@@ -292,15 +292,6 @@ class MobileConfirmationPage(PartialHTMLPage, AppValidationPage):
 
 # PartialHTMLPage: this page shares URL with other pages,
 # that might be empty of text while used in a redirection
-class DigipassPage(PartialHTMLPage, AppValidationPage):
-    def is_here(self):
-        # The message we're looking for is "Scannez la mosaïque avec votre lecteur DIGIPASS,
-        # puis saisissez le mot de passe unique généré (OTP) :"
-        return "lecteur DIGIPASS" in CleanText('//span[contains(@id, "qrcodelbl")]')(self.doc)
-
-
-# PartialHTMLPage: this page shares URL with other pages,
-# that might be empty of text while used in a redirection
 class SafeTransPage(PartialHTMLPage, AppValidationPage):
     # only 'class' and cryptic 'id' tags on this page
     # so we scrape based on text, not tags
@@ -370,6 +361,29 @@ class OtpBlockedErrorPage(PartialHTMLPage):
 
     def get_error_message(self):
         return CleanText('//div[contains(@class, "bloctxt err")]')(self.doc)
+
+
+# DIGIPASS-based OTP seems very close to SMS-based OTP, reuse accordingly (at
+# least get_otp_data):
+class DigipassPage(OtpValidationPage):
+    def is_here(self):
+        # The message we're looking for is "Scannez la mosaïque avec votre lecteur DIGIPASS,
+        # puis saisissez le mot de passe unique généré (OTP) :"
+        return "lecteur DIGIPASS" in CleanText('//span[contains(@id, ":qrcodelbl")]')(self.doc)
+
+    def get_message(self):
+        return CleanText('//span[contains(@id, ":qrcodelbl")]')(self.doc).rstrip(":")
+
+    def get_digipass_image(self):
+        img = self.doc.xpath('//img[contains(@id, ":qrCodeImage")]')
+        if not img:
+            raise AssertionError("La mosaïque à scanner (DIGIPASS) n'a pas été détectée sur la page")
+
+        m = re.match("data:(image/png);base64,(.*)", img[0].attrib["src"])
+        if m is None:
+            raise AssertionError("La mosaïque à scanner (DIGIPASS) n'est pas encodée dans le format attendu")
+
+        return {"mime_type": m.group(1), "b64_data": m.group(2)}
 
 
 class EmptyPage(LoggedPage, HTMLPage):
