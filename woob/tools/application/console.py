@@ -44,6 +44,7 @@ from woob.exceptions import (
     BrowserSSLError,
     BrowserUnavailable,
     CaptchaQuestion,
+    ImageQuestion,
     ModuleInstallError,
     ModuleLoadError,
     NeedInteractiveFor2FA,
@@ -667,7 +668,9 @@ class ConsoleApplication(Application):
 
         This method can be overridden to support more exceptions types.
         """
-        if isinstance(error, BrowserQuestion):
+        if isinstance(error, ImageQuestion):
+            print("Warning(%s): Image-based question has been found on login page" & backend.name, file=self.stderr)
+        elif isinstance(error, BrowserQuestion):
             for field in error.fields:
                 v = self.ask(field)
                 if v:

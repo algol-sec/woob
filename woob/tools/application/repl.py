@@ -31,7 +31,7 @@ import yaml
 from woob.capabilities.base import BaseObject, FieldNotFound, UserError, empty
 from woob.capabilities.collection import BaseCollection, CapCollection, Collection, CollectionNotFound
 from woob.core import CallErrors
-from woob.exceptions import BrowserQuestion, BrowserRedirect, DecoupledValidation
+from woob.exceptions import BrowserQuestion, BrowserRedirect, DecoupledValidation, ImageQuestion
 from woob.tools.application.formatters.iformatter import MandatoryFieldsNotFound
 from woob.tools.path import WorkingPath
 
@@ -425,7 +425,7 @@ class ReplApplication(ConsoleApplication, Cmd):
         errors which allow to retry.
 
         List of handled errors:
-        - BrowserQuestion
+        - BrowserQuestion (except ImageQuestion)
         - BrowserRedirect
         - DecoupledValidation
         """
@@ -453,7 +453,7 @@ class ReplApplication(ConsoleApplication, Cmd):
             backends = set()
 
             for backend, error, backtrace in errors.errors:
-                if isinstance(error, BrowserQuestion):
+                if isinstance(error, BrowserQuestion) and not isinstance(error, ImageQuestion):
                     for field in error.fields:
                         v = self.ask(field)
                         backend.config[field.id].set(v)
