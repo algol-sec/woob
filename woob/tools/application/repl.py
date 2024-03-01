@@ -24,6 +24,7 @@ import signal
 from cmd import Cmd
 from collections import OrderedDict, deque
 from datetime import datetime
+from io import BytesIO
 from optparse import IndentedHelpFormatter, OptionGroup, OptionParser
 
 import yaml
@@ -425,7 +426,8 @@ class ReplApplication(ConsoleApplication, Cmd):
         errors which allow to retry.
 
         List of handled errors:
-        - BrowserQuestion (except ImageQuestion)
+        - BrowserQuestion
+        - ImageQuestion
         - BrowserRedirect
         - DecoupledValidation
         """
@@ -453,9 +455,13 @@ class ReplApplication(ConsoleApplication, Cmd):
             backends = set()
 
             for backend, error, backtrace in errors.errors:
-                if isinstance(error, BrowserQuestion) and not isinstance(error, ImageQuestion):
+                if isinstance(error, BrowserQuestion):
                     for field in error.fields:
-                        v = self.ask(field)
+                        if isinstance(error, ImageQuestion):
+                            image_file = BytesIO(error.image_data)
+                            v = self.ask(field, image_file=image_file)
+                        else:
+                            v = self.ask(field)
                         backend.config[field.id].set(v)
                 elif isinstance(error, BrowserRedirect):
                     print("Open this URL in a browser:")

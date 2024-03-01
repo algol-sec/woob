@@ -26,10 +26,19 @@ import sys
 import warnings
 from collections import OrderedDict
 from copy import copy
+from io import BytesIO
 from subprocess import check_output
 from tempfile import NamedTemporaryFile
 
+from PIL import Image
+from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
+
+
+try:
+    from textual_image.renderable import Image as TextImage
+except ImportError:
+    TextImage = None
 
 from woob.capabilities import UserError
 from woob.capabilities.account import Account, AccountRegisterError, CapAccount
@@ -472,7 +481,7 @@ class ConsoleApplication(Application):
         print('Backend "{}" successfully {}.'.format(backend_name, "edited" if edit else "added"))
         return backend_name
 
-    def ask(self, question, default=None, masked=None, regexp=None, choices=None, tiny=None):
+    def ask(self, question, default=None, masked=None, regexp=None, choices=None, tiny=None, image_file=None):
         """
         Ask a question to user.
 
@@ -488,6 +497,8 @@ class ConsoleApplication(Application):
         :type choices: list
         :param tiny: ask for the (small) value of the choice
         :type tiny: bool
+        :param image_file: image file to be shown with the question
+        :type image_file: filename, pathlib.Path or file
         :returns: text by user
         :rtype: str
         """
@@ -581,7 +592,32 @@ class ConsoleApplication(Application):
 
         question += ": "
 
+        show_image_choice = ""
+        console_image = None
+        if image_file is not None:
+            print("An image needs to be shown in the next prompt:")
+            image_choices = OrderedDict()
+            image_choices["t"] = (
+                "current Terminal (your terminal must suppport either Sixel protocol, or TGP - Kitty's graphical protocol)"
+            )
+            image_choices["o"] = "Open in the default image viewer"
+            image_default = "t"
+
+            show_image_choice = self.ask(
+                "*** How do you want to show it?", choices=image_choices, tiny=True, default=image_default
+            )
+
+            if show_image_choice == "o":
+                Image.open(image_file).show()
+            elif TextImage is None:
+                raise ImportError("Please install textual-image")
+            else:
+                console_image = TextImage(image_file)
+
         while True:
+            if console_image:
+                console = Console()
+                console.print(console_image)
             if v.masked:
                 line = getpass.getpass(question)
                 if sys.platform != "win32":
@@ -668,11 +704,13 @@ class ConsoleApplication(Application):
 
         This method can be overridden to support more exceptions types.
         """
-        if isinstance(error, ImageQuestion):
-            print("Warning(%s): Image-based question has been found on login page" & backend.name, file=self.stderr)
-        elif isinstance(error, BrowserQuestion):
+        if isinstance(error, BrowserQuestion):
             for field in error.fields:
-                v = self.ask(field)
+                if isinstance(error, ImageQuestion):
+                    image_file = BytesIO(error.image_data)
+                    v = self.ask(field, image_file=image_file)
+                else:
+                    v = self.ask(field)
                 if v:
                     backend.config[field.id].set(v)
         elif isinstance(error, CaptchaQuestion):
