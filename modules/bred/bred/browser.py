@@ -502,7 +502,9 @@ class BredBrowser(TwoFactorBrowser):
     @need_login
     def get_list(self):
         self.accounts.go()
-        return self.page.iter_accounts(accnum=self.accnum, current_univers=self.current_univers)
+        for account in self.page.iter_accounts(accnum=self.accnum, current_univers=self.current_univers):
+            self.fill_account(account, ["iban"])
+            yield account
 
     @need_login
     def get_life_insurance_list(self):
