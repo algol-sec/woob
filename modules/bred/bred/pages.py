@@ -254,6 +254,7 @@ class AccountsPage(LoggedPage, MyJsonPage):
                 continue
             for poste in content["postes"]:
                 a = Account()
+                a.bank_name = "BRED Banque Populaire"
                 a._number = content["numeroLong"]
                 a._nature = poste["codeNature"]
                 a._codeSousPoste = poste["codeSousPoste"] if "codeSousPoste" in poste else None
