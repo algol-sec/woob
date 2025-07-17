@@ -60,10 +60,12 @@ class BouyguesBrowser(TwoFactorBrowser):
 
     home_page = URL(r"https://www.bouyguestelecom.fr/?$", HomePage)
     oauth_page = URL(r"https://oauth2.bouyguestelecom.fr/authorize", OauthPage)
+
     login_page = URL(r"https://www.mon-compte.bouyguestelecom.fr/cas/login", LoginPage)
     # used with oauth_page as a redirect_uri param
     callback = URL(
-        r"https://assets.bouyguestelecom.fr/PICASSO-FRONT/main@0.19.1/bouyguestelecom.fr/callback.html",
+        r"https://www.bouyguestelecom.fr/mon-compte/all/callback.html",
+        r"https://www.bouyguestelecom.fr/mon-compte/all/callback.html\?code=(?P<code>[-a-z0-9]+)&state=(?P<state>[0-9a-zA-Z]_login)",
         CallbackPage,
     )
     maintenance = URL(r"https://www.bouyguestelecom.fr/static/maintenance.html", MaintenancePage)
