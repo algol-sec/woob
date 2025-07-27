@@ -47,7 +47,7 @@ dependencies = [
     "Babel",
     "packaging >=23.0, <25",
     "pycountry",
-    "rich ~= 13.0",
+    "rich >= 13",
     "termcolor",
     "schwifty >= 2024.1",
     "deprecated",
