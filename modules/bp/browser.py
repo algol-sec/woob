@@ -21,15 +21,15 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from dateutil.relativedelta import relativedelta
 from requests.exceptions import HTTPError
 
-from woob.browser import URL, LoginBrowser, need_login
+from woob.browser import URL, PagesBrowser, StatesMixin, need_login
 from woob.browser.adapters import LowSecHTTPAdapter
-from woob.browser.browsers import StatesMixin
 from woob.browser.exceptions import ServerError
+from woob.browser.selenium import IsHereCondition, NotCondition, SeleniumBrowser, SubSeleniumMixin
 from woob.capabilities.bank import (
     Account,
     AccountOwnership,
@@ -53,10 +53,8 @@ from woob.exceptions import (
     AppValidationCancelled,
     AppValidationExpired,
     BrowserIncorrectPassword,
-    BrowserQuestion,
     BrowserUnavailable,
     BrowserUserBanned,
-    NeedInteractiveFor2FA,
 )
 from woob.tools.decorators import retry
 from woob.tools.url import get_url_param
@@ -64,41 +62,29 @@ from woob.tools.value import Value
 from woob_modules.linebourse.browser import LinebourseAPIBrowser
 
 from .pages import (
-    AccountDesactivate,
     AccountHistory,
     AccountList,
     AccountRIB,
     Advisor,
-    BadLoginPage,
     CardsJsonDetails,
     CardsList,
     CerticodePlusSubmitDevicePage,
-    CheckPassword,
     CompleteTransfer,
     ConfirmPage,
     CreateRecipient,
-    DecoupledPage,
     DownloadPage,
-    Initident,
-    LoginPage,
     Loi6902TransferPage,
     OtpErrorPage,
-    PersonalLoanRoutagePage,
     ProSubscriptionPage,
     ProTransferChooseAccounts,
     RcptSummary,
-    SmsPage,
     SubscriptionPage,
     TemporaryPage,
     TransferChooseAccounts,
     TransferConfirm,
     TransferSummary,
-    TwoFAPage,
-    UnavailablePage,
     ValidateCountry,
-    Validated2FAPage,
     ValidateRecipient,
-    repositionnerCheminCourant,
 )
 from .pages.accounthistory import (
     LifeInsuranceAccessHistory,
@@ -119,7 +105,30 @@ from .pages.accountlist import (
     UserTransactionIDPage,
 )
 from .pages.base import IncludedUnavailablePage, UselessPage
-from .pages.login import LienJavascript, NoTerminalPage, Polling2FA, PostLoginPage
+from .pages.login import (
+    AccountDesactivate,
+    AttenteAF,
+    BadLoginPage,
+    CheckPassword,
+    DecoupledPage,
+    Initident,
+    LienJavascript,
+    LoginDeniedAF,
+    LoginMessage2FA,
+    LoginPage,
+    LoginPageSelenium,
+    MessageAuth,
+    NoTerminalPage,
+    PersonalLoanRoutagePage,
+    Polling2FA,
+    PollingPage,
+    PostLoginPage,
+    SmsPage,
+    TwoFAPage,
+    UnavailablePage,
+    Validated2FAPage,
+    repositionnerCheminCourant,
+)
 from .pages.mandate import MandateAccountsList, MandateLife, MandateMarket, PreMandate, PreMandateBis
 from .pages.pro import (
     Detect2FAPage,
@@ -136,18 +145,90 @@ from .pages.pro import (
 __all__ = ["BPBrowser", "BProBrowser"]
 
 
-class BPBrowser(LoginBrowser, StatesMixin):
+class BPSeleniumBrowser(SeleniumBrowser):
+
+    BASEURL = "https://voscomptesenligne.labanquepostale.fr"
+    HEADLESS = True
+    # does not work with chrome
+    # DRIVER = selenium.webdriver.Chrome
+
+    login_url = (
+        r"https://voscomptesenligne.labanquepostale.fr/voscomptes/" + r"canalXHTML/identif.ea?origin=particuliers"
+    )
+    login_page = URL(
+        r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&ERROR_CODE=0x00000000&"
+        + r"URL=%2Fvoscomptes%2FcanalXHTML%2Fidentif.ea%3Forigin%3Dparticuliers",
+        LoginPageSelenium,
+    )
+    login_message_auth = URL(
+        r"https://transverse.labanquepostale.fr/xo_/messages/message.html\?param=AuthentInfoAF.*",
+        MessageAuth,
+    )
+    login_attente_af = URL(
+        r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&phase=2b&cu=attenteAF.*",
+        AttenteAF,
+    )
+
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.username = config["login"].get()
+        self.password = config["password"].get()
+        self.resume = config["resume"].get()
+        self.driver.implicitly_wait(3)
+
+    def do_login(self):
+        # go to login page
+        self.location(self.login_url)
+        # self.wait_until(StablePageCondition())
+
+        assert self.login_page.is_here()
+        # fill username/password
+        self.page.do_login()
+        self.wait_until(NotCondition(IsHereCondition(self.login_page)))
+        # wait for "Authentification Forte"
+        if self.login_attente_af.is_here():
+            self.logger.warning(
+                "The bp module should now trigger an authentication" + " challenge on your security device. Message :"
+            )
+            self.logger.warning(self.page.message)
+
+            self.wait_until(
+                NotCondition(IsHereCondition(self.login_attente_af)),
+                timeout=1800,
+            )
+
+
+class BPBrowser(PagesBrowser, SubSeleniumMixin, StatesMixin):
     BASEURL = "https://voscomptesenligne.labanquepostale.fr"
     HTTP_ADAPTER_CLASS = LowSecHTTPAdapter
     STATE_DURATION = 10
     TIMEOUT = 20
 
-    # FIXME beware that '.*' in start of URL() won't match all domains but only under BASEURL
+    SELENIUM_BROWSER = BPSeleniumBrowser
+
+    # FIXME beware that '.*' in start of URL() won't match all domains
+    # but only under BASEURL
 
     included_unavailable_page = URL(r".*", IncludedUnavailablePage)
 
-    login_image = URL(r".*wsost/OstBrokerWeb/loginform\?imgid=", UselessPage)
-    login_page = URL(r".*wsost/OstBrokerWeb/loginform.*", LoginPage)
+    login_url = "/wsost/OstBrokerWeb/loginform?TAM_OP=login&ERROR_CODE=0x00000000&URL=%2Fvoscomptes%2FcanalXHTML%2Fidentif.ea%3Forigin%3Dparticuliers"
+    post_login_page = URL(r"/wsost/OstBrokerWeb/auth", PostLoginPage)
+    login_image = URL(r"/wsost/OstBrokerWeb/loginform\?imgid=.*", UselessPage)
+    login_page = URL(r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&ERROR_CODE=0x00000000.*", LoginPage)
+    login_message_2fa = URL(
+        r"https://transverse.labanquepostale.fr/xo_/messages/message.html\?param=AuthentInfoAF.*",
+        LoginMessage2FA,
+    )
+    login_polling_page = URL(
+        r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&phase=bb&cu=attenteAF&origin=particuliers",
+        r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&phase=2b&cu=attenteAF",
+        PollingPage,
+    )
+    login_denied_af = URL(
+        r"https://transverse.labanquepostale.fr/xo_/messages/message.html\?param=AfRefusee.*",
+        LoginDeniedAF,
+    )
     lien_javascript = URL(
         r".*authentification/repositionnerCheminCourant-identif.ea",
         r".*/securite/authentification/verifierPresenceCompteOK-identif.ea",
@@ -183,7 +264,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
         DecoupledPage,
     )
     polling_page = URL(
-        "/voscomptes/canalXHTML/securite/gestionAuthentificationForte/validationOperation-gestionAuthentificationForte.ea",
+        r"/voscomptes/canalXHTML/securite/gestionAuthentificationForte/validationOperation-gestionAuthentificationForte.ea",
         Polling2FA,
     )
     polling_MPIN_page = URL("/voscomptes/canalXHTML/securisation/mpin/validerOperation-securisationMPIN.ea", Polling2FA)
@@ -428,9 +509,6 @@ class BPBrowser(LoginBrowser, StatesMixin):
         Advisor,
     )
 
-    login_url = "https://voscomptesenligne.labanquepostale.fr/wsost/OstBrokerWeb/loginform?TAM_OP=login&ERROR_CODE=0x00000000&URL=%2Fvoscomptes%2FcanalXHTML%2Fidentif.ea%3Forigin%3Dparticuliers"
-    post_login_page = URL(r"https://voscomptesenligne.labanquepostale.fr/wsost/OstBrokerWeb/auth", PostLoginPage)
-
     pre_mandate = URL(r"/voscomptes/canalXHTML/sso/commun/init-integration.ea\?partenaire=procapital", PreMandate)
     pre_mandate_bis = URL(
         r"https://www.gestion-sous-mandat.labanquepostale-gestionprivee.fr/lbpgp/secure/main.html", PreMandateBis
@@ -469,8 +547,10 @@ class BPBrowser(LoginBrowser, StatesMixin):
     __states__ = ("need_reload_state", "sms_form")
 
     def __init__(self, config, *args, **kwargs):
-        self.config = config
         super().__init__(*args, **kwargs)
+        self.config = config
+        self.username = config["login"].get()
+        self.password = config["password"].get()
         self.resume = config["resume"].get()
         self.request_information = config["request_information"].get()
 
@@ -493,9 +573,20 @@ class BPBrowser(LoginBrowser, StatesMixin):
             # We don't want to come back to last URL during SCA
             state.pop("url")
 
-        if state.get("need_reload_state"):
-            super().load_state(state)
-            self.need_reload_state = None
+        super().load_state(state)
+        self.need_reload_state = None
+
+        for cookie in self.session.cookies:
+            cookie.value = unquote(cookie.value)
+        self.logger.debug(
+            "cookies:\n"
+            + "\n".join(
+                [f"(expired={cookie.is_expired()}) {cookie.name} = {cookie.value}" for cookie in self.session.cookies]
+            )
+        )
+        for c in self.session.cookies:
+            if c.is_expired():
+                self.session.cookies.clear(c.domain, c.path, c.name)
 
     def deinit(self):
         super().deinit()
@@ -525,8 +616,17 @@ class BPBrowser(LoginBrowser, StatesMixin):
         return False
 
     def login_without_2fa(self):
-        self.location(self.login_url)
-        self.page.login(self.username, self.password)
+        try:
+            super().do_login()
+        except Exception as e:
+            self.logger.warning(f"Error login in with selenium browser: {e}")
+            self.logger.warning(
+                "Trying with legacy browser.\n"
+                + "Please note that Strong Authentication is required "
+                + "at each login with the legacy browser !"
+            )
+            self.location(self.login_url)
+            self.page.login()
 
         if self.post_login_page.is_here():
             error_message = self.page.get_error_message()
@@ -546,6 +646,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         if self.badlogin.is_here():
             raise BrowserIncorrectPassword()
+
         if self.disabled_account.is_here():
             raise BrowserUserBanned()
 
@@ -557,54 +658,36 @@ class BPBrowser(LoginBrowser, StatesMixin):
         elif self.code:
             return self.handle_sms()
 
-        self.login_without_2fa()
-
-        if self.auth_page.is_here():
-            auth_method = self.page.get_auth_method()
-
-            if auth_method == "cer+":
-                # We try to request the validated 2fa page
-                self.validated_2fa_page.go()
-                # if it leads to afficheSyntheseCCP-synthese_ccp.ea, we are in.
+        # avoid reconnecting if session has not been ended
+        if self.session.cookies.get("IDENT") == "1":
+            try:
+                self.par_accounts_checking.go()
                 if self.par_accounts_checking.is_here():
                     return
-                else:
-                    self.logger.warning(
-                        "The bp module should now trigger an authentication challenge on your cell phone, but this part has never been tested (2024-05-02)"
-                    )
+            except Exception:
+                self.logger.warning("Failure to go to accounts page without logging in")
 
-                # We force here the first device present
-                self.decoupled_page.go(params={"deviceSelected": "0"})
-                if self.no_terminal.is_here() and self.page.has_no_terminal():
-                    raise ActionNeeded(
-                        locale="fr-FR",
-                        message="Veuillez associer votre téléphone à votre compte bancaire pour réaliser l'authentification forte",
-                        action_type=ActionType.ENABLE_MFA,
-                    )
-                self.handle_polling()
+        self.login_without_2fa()
 
-            elif auth_method == "cer":
-                self.location(
-                    "/voscomptes/canalXHTML/securite/gestionAuthentificationForte/authenticateCerticode-gestionAuthentificationForte.ea"
+        if self.login_message_2fa.is_here():
+            self.login_polling_page.go()
+
+            if self.login_polling_page.is_here():
+                self.logger.warning(
+                    "The bp module should now trigger an authentication" + " challenge on your security device"
                 )
-                self.page.check_if_is_blocked()
-                self.sms_form = self.page.get_sms_form()
-                self.need_reload_state = True
-                raise BrowserQuestion(Value("code", label="Entrez le code reçu par SMS"))
+                self.logger.warning(self.page.message)
 
-            elif auth_method == "no2fa":
-                raise ActionNeeded(
-                    locale="fr-FR",
-                    message="Veuillez activer votre service gratuit d'authentification forte sur votre site bancaire.",
-                    action_type=ActionType.ENABLE_MFA,
-                )
+                poll_response = self.page.poll()
+                self.location(poll_response.url)
 
-            elif self.request_information is None and auth_method != "no2fa":
-                # We don't want to raise this exception if 2FA is absent
-                raise NeedInteractiveFor2FA()
+        if self.login_denied_af.is_here():
+            self.logger.error("Authentication timed out or rejected")
+            raise AppValidationExpired()
 
-        # If we are here, we don't need 2FA, we are logged
+        # If we are here, we should be logged
 
+    # deprecated
     def do_polling(self, url):
         timeout = time.time() + 300.00
         while time.time() < timeout:
@@ -656,9 +739,11 @@ class BPBrowser(LoginBrowser, StatesMixin):
             to_check = []
             mandate_urls = []
 
-            self.par_accounts_checking.go()
-
-            pages = [self.par_accounts_checking, self.par_accounts_savings_and_invests, self.par_accounts_loan]
+            pages = [
+                self.par_accounts_checking,
+                self.par_accounts_savings_and_invests,
+                self.par_accounts_loan,
+            ]
             no_accounts = 0
             for page in pages:
                 page.go()
@@ -683,7 +768,7 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
                     elif account.type == Account.TYPE_PERP:
                         # PERP balances must be fetched from the details page,
-                        # otherwise we just scrape the "Rente annuelle estimée":
+                        # otherwise we just scrape the "Rente annuelle estimée"
                         balance_page = self.open(account.url).page
                         # Sometimes the balance page is not available (with the site saying the account detail will
                         # soon be available). In the meantime, just skip it and use the balance we already have.
@@ -878,7 +963,8 @@ class BPBrowser(LoginBrowser, StatesMixin):
                 return self.page.get_history()
 
             elif account.type == Account.TYPE_LIFE_INSURANCE:
-                self.lifeinsurance_init_page.go()  # Mandatory for lifeinsurance_history_access_page
+                # Mandatory for lifeinsurance_history_access_page
+                self.lifeinsurance_init_page.go()
                 self.lifeinsurance_access_page.go()
                 product_code = self.page.get_product_code()
                 assert product_code, "product_code not found"
@@ -989,7 +1075,8 @@ class BPBrowser(LoginBrowser, StatesMixin):
 
         self.location(account.url)
 
-        self.lifeinsurance_init_page.go()  # Mandatory for lifeinsurance_history_access_page
+        # Mandatory for lifeinsurance_history_access_page
+        self.lifeinsurance_init_page.go()
         self.lifeinsurance_access_page.go()
         product_code = self.page.get_product_code()
         assert product_code, "product_code not found"
@@ -1353,7 +1440,8 @@ class BProBrowser(BPBrowser):
         self.location("../bourseenligne/oicformautopost.jsp")
         self.update_linebourse_session()
 
-        self.pro_accounts_list.go()  # just to reinit bprobrowser session to be able to go to linebourse once more
+        # just to reinit bprobrowser session to be able to go to linebourse once more
+        self.pro_accounts_list.go()
 
     @need_login
     def get_history(self, account):
@@ -1364,7 +1452,8 @@ class BProBrowser(BPBrowser):
         try:
             self.pro_history.go(
                 account_id=account.id
-            )  # seems to fetch by default max nb of transactions without pagination (last 3 months)
+                # seems to fetch by default max nb of transactions without pagination (last 3 months)
+            )
         except ServerError as e:
             if e.response.status_code == 500 and "momentanément indisponible" in e.response.text:
                 raise BrowserUnavailable()
@@ -1386,7 +1475,8 @@ class BProBrowser(BPBrowser):
             raise BrowserUnavailable(error)
 
     def go_to_rib(self, account):
-        self.rib_choice.go(params={"numeroCompte": account.id})  # iban only available from RIB
+        # iban only available from RIB
+        self.rib_choice.go(params={"numeroCompte": account.id})
         value = self.page.get_rib_value(account.id)
         if value:
             self.rib.go(params={"idxSelection": value})
@@ -1432,7 +1522,8 @@ class BProBrowser(BPBrowser):
         profile = self.get_profile()
         if profile:
             subscriber = profile.name
-        else:  # TODO: find why we don't get profile though the rib (and consequently the profile) exists
+        # TODO: find why we don't get profile though the rib (and consequently the profile) exists
+        else:
             subscriber = NotAvailable
         self.subscription.go()
         return self.page.iter_subscriptions(subscriber=subscriber)

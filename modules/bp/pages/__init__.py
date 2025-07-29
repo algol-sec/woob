@@ -19,20 +19,6 @@
 
 from .accounthistory import AccountHistory, CardsJsonDetails, CardsList, TemporaryPage
 from .accountlist import AccountList, AccountRIB, Advisor
-from .login import (
-    AccountDesactivate,
-    BadLoginPage,
-    CheckPassword,
-    DecoupledPage,
-    Initident,
-    LoginPage,
-    PersonalLoanRoutagePage,
-    SmsPage,
-    TwoFAPage,
-    UnavailablePage,
-    Validated2FAPage,
-    repositionnerCheminCourant,
-)
 from .subscription import DownloadPage, ProSubscriptionPage, SubscriptionPage
 from .transfer import (
     CerticodePlusSubmitDevicePage,
@@ -52,19 +38,12 @@ from .transfer import (
 
 
 __all__ = [
-    "LoginPage",
-    "Initident",
-    "CheckPassword",
-    "repositionnerCheminCourant",
     "AccountList",
     "AccountHistory",
-    "BadLoginPage",
-    "AccountDesactivate",
     "TransferChooseAccounts",
     "CompleteTransfer",
     "TransferConfirm",
     "TransferSummary",
-    "UnavailablePage",
     "CardsList",
     "AccountRIB",
     "Advisor",
@@ -76,14 +55,9 @@ __all__ = [
     "SubscriptionPage",
     "DownloadPage",
     "ProSubscriptionPage",
-    "Validated2FAPage",
-    "TwoFAPage",
-    "SmsPage",
-    "DecoupledPage",
     "Loi6902TransferPage",
     "CerticodePlusSubmitDevicePage",
     "OtpErrorPage",
-    "PersonalLoanRoutagePage",
     "TemporaryPage",
     "CardsJsonDetails",
     "ProTransferChooseAccounts",

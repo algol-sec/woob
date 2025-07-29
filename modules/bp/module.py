@@ -73,11 +73,12 @@ class BPModule(
     def create_default_browser(self):
         self.BROWSER = self.AVAILABLE_BROWSERS[self.config["website"].get()]
 
-        return self.create_browser(
-            self.config,
-            self.config["login"].get(),
-            self.config["password"].get(),
-        )
+        return self.create_browser(self.config)
+        # return self.create_browser(
+        #     self.config,
+        #     self.config["login"].get(),
+        #     self.config["password"].get(),
+        # )
 
     def iter_accounts(self):
         return self.browser.get_accounts_list()

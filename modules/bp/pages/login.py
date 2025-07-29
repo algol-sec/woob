@@ -18,9 +18,13 @@
 # flake8: compatible
 
 import re
+import time
+
+from selenium.webdriver.common.by import By
 
 from woob.browser.filters.standard import CleanText, Lower, Regexp
-from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
+from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
+from woob.browser.selenium import SeleniumPage
 from woob.capabilities.bank import NoAccountsException
 from woob.exceptions import ActionNeeded, ActionType, BrowserIncorrectPassword, BrowserUnavailable, ParseError
 
@@ -33,14 +37,14 @@ class UnavailablePage(MyHTMLPage):
 
 
 class LoginPage(MyHTMLPage):
-    def login(self, login, pwd):
+    def login(self):
         # we need to get iscd data from js file to complete the login form.
         dasti_js = self.browser.open("https://d21j9nkdg2p3wo.cloudfront.net/321226/dasti.js").text
         iscd = re.match(r".*j=\"(\w{52})\".*", dasti_js).group(1)
 
         form = self.get_form(name="formAccesCompte")
-        form["password"] = self.get_password_from_virtualkeyboard(pwd)
-        form["username"] = login
+        form["password"] = self.get_password_from_virtualkeyboard(self.browser.password)
+        form["username"] = self.browser.username
         form["iscdName"] = iscd
         form["cltName"] = "1"
         form.submit()
@@ -59,6 +63,45 @@ class LoginPage(MyHTMLPage):
             code += vk[number]
 
         return code
+
+
+class LoginPageSelenium(SeleniumPage):
+    # def login(self, login: str, pwd: str):
+    def do_login(self):
+        # self.browser.wait_until(StablePageCondition())
+        # print(self.driver.get_cookies())
+
+        bouton_cookies = self.driver.find_elements(By.XPATH, '//button[contains(@title, "cookies essentiels")]')
+        if len(bouton_cookies) == 1:
+            bouton_cookies[0].click()
+
+        idcompte = self.driver.find_element(By.ID, "identifiant")
+        idcompte.send_keys(self.browser.username)
+
+        continuer = self.driver.find_element(By.ID, "btnContinuer")
+        continuer.click()
+
+        for c in self.browser.password:
+            btpass = self.driver.find_element(By.XPATH, f'//button[text()="{c}"]')
+            btpass.click()
+
+        confirmer = self.driver.find_element(By.ID, "btnConfirmer")
+        confirmer.click()
+
+
+class MessageAuth(SeleniumPage):
+    def on_load(self):
+        confirmer = self.driver.find_element(By.ID, "back-link")
+        confirmer.click()
+
+
+class AttenteAF(SeleniumPage):
+    def on_load(self):
+        self.message = CleanText('//body/div/main/div[@class=""]')(self.doc)
+
+
+class LoginMessage2FA(MyHTMLPage):
+    pass
 
 
 class PostLoginPage(HTMLPage):
@@ -171,7 +214,7 @@ class TwoFAPage(MyHTMLPage):
         ):
             return "cer+"
         elif re.search(
-            "authentification forte via Certicode vous" + "|code de sécurité que vous recevrez par SMS", status_message
+            "authentification forte via Certicode vous|code de sécurité que vous recevrez par SMS", status_message
         ):
             return "cer"
         elif (
@@ -192,9 +235,17 @@ class TwoFAPage(MyHTMLPage):
             short_message = CleanText('(//div[@class="textFCK"])[1]//p[1]')(self.doc)
             if short_message:
                 # short_message is the first sentence only
-                raise ActionNeeded(short_message, locale="fr-FR", action_type=ActionType.ENABLE_MFA)
+                raise ActionNeeded(
+                    short_message,
+                    locale="fr-FR",
+                    action_type=ActionType.ENABLE_MFA,
+                )
             # just in case the short message is not present
-            raise ActionNeeded(status_message, locale="fr-FR", action_type=ActionType.ENABLE_MFA)
+            raise ActionNeeded(
+                status_message,
+                locale="fr-FR",
+                action_type=ActionType.ENABLE_MFA,
+            )
         elif "votre Espace Client Internet requiert une authentification forte tous les 90 jours" in status_message:
             # short_message takes only the first sentence of status_message to avoid
             # some verbose explanations about how to set the SCA
@@ -211,6 +262,37 @@ class TwoFAPage(MyHTMLPage):
 
 class Polling2FA(JsonPage):
     pass
+
+
+class LoginDeniedAF(MyHTMLPage):
+    pass
+
+
+class PollingPage(MyHTMLPage):
+
+    def on_load(self):
+        script = CleanText('//body/script[@language="javascript"]')
+        self.origin = Regexp(script, r'var origin = "([^"]*)"')(self.doc)
+        self.pph = Regexp(script, r'var PPH = "([^"]*)"')(self.doc)
+        self.url_af_polling = Regexp(script, r'var URL_AF_POLLING = "([^"]*)"')(self.doc)
+        self.polling_url = self.pph + self.url_af_polling
+        self.message = CleanText('//body/div/main/div[@class=""]')(self.doc)
+
+    def poll(self):
+        self.logger.debug(f"polling_url={self.polling_url}")
+
+        timeout = time.time() + 300.00
+        while True:
+            réponse = self.browser.open(self.polling_url, page=RawPage)
+            self.logger.debug(
+                f"réponse.page = {réponse.page} compte à rebours = {timeout - time.time()} "
+                + f"réponse.url = {réponse.url}"
+            )
+            if réponse.url != self.polling_url:
+                self.logger.debug("sortie de PollingPage.poll")
+                return réponse
+
+            time.sleep(10)
 
 
 class Validated2FAPage(MyHTMLPage):
