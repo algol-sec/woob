@@ -630,7 +630,12 @@ class BoursoramaBrowser(RetryLoginBrowser, TwoFactorBrowser):
 
         elif self.identity_chooser.is_here():
             identities = list(self.page.iter_identities())
-            self.go(identities[0].link)
+            for i in identities:
+                if "identity" in self.config and i.label == self.config["identity"].get():
+                    self.location(i.link)
+                    break
+            else:
+                self.location(identities[0].link)
 
         # After login, we might be redirected to the two factor authentication page.
         self.handle_authentication()
