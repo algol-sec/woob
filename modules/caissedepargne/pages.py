@@ -55,21 +55,6 @@ from woob.tools.capabilities.bank.transactions import FrenchTransaction
 from woob.tools.captcha.virtkeyboard import SplitKeyboard
 
 
-BANK_SNIPPET_ID_REGEX = r"""(?x) # regex extended mode
-\b
-class\ [A-Z]         # the class we are looking for is not necessarily named 'B'
-(?P<class_contents>
-    {
-        (?:
-            static\#[a-z]=this\.for
-            ([^=]+)  # bank name
-            =
-            {[^}]+}  # bank data, assuming a simple dict
-            ;? # no semicolon after the last bank=data pair
-        )+
-    }
-)
-"""
 NULL_UUID = "00000000-0000-0000-0000-000000000000"
 UUID_REGEX_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
@@ -97,35 +82,10 @@ class ConfigPage(JsonPage):
 
 
 class JsFilePage(RawPage):
-    gateway_access = None
-    class_b = None
-
     def get_json_gateway_access(self):
-        if not self.gateway_access:
-            result = Regexp(pattern=r",gatewayAccess:(.*),appDynamics:").filter(self.text)
-            assert result, 'Could not find "gatewayAccess:" in main JS, check if it has been updated'
-            self.gateway_access = chompjs.parse_js_object(result)
-        return self.gateway_access
-
-    def get_class_b(self):
-        if not self.class_b:
-            result = re.search(BANK_SNIPPET_ID_REGEX, self.text)
-            assert result, 'Could not find the definition of "snippetId"s in main JS, check if it has been updated'
-            result = result.group("class_contents")
-            # The result is a JS Class definition - which is difficult to parse:
-            # e.g.: `{static#e=this.forCe={snippetId:"224837",domainBank:U.K.CE};static#t=this.forBp={...`
-            #
-            # We convert it to a (kind of) dictionnary
-            # e.g.: `{CE:{snippetId:"224837",domainBank:U.K.CE},BP:{...`
-            #
-            # 1) remove the `static...=`
-            result = re.sub(r"static#[^=]+=", "", result)
-            # 2) transform assignment (... = ) in dict definition (... : ) ; transform name in UPPER CASE and remove `this.for` prefix
-            result = re.sub(r"this\.for([^=]+)=", lambda m: f"{m.group(1).upper()}:", result)
-            # 3) dict entries are separated with `,`
-            result = re.sub(r";", ",", result)
-            self.class_b = chompjs.parse_js_object(result)
-        return self.class_b
+        result = Regexp(pattern=r",gatewayAccess:(.*),bpceConnectAccess:", default=None).filter(self.text)
+        if result:
+            return chompjs.parse_js_object(result)
 
     def get_chunk_list(self):
         return re.findall(r"\bchunk-[A-Z0-9]{8}.js\b", self.text)
@@ -136,22 +96,6 @@ class JsFilePage(RawPage):
             if client_id not in ignore:
                 yield client_id
 
-    def get_first_client_id(self):
-        # Needed for pre-login
-        self.get_json_gateway_access()
-        result = self.gateway_access.get("EXT-ATH", {}).get("anonymous", {}).get("clientId", NotAvailable)
-        return result
-
-    def get_second_client_id(self):
-        # Needed for login initialization
-        self.get_json_gateway_access()
-        result = self.gateway_access.get("EXT-ATH", {}).get("authenticated", {}).get("clientId", NotAvailable)
-        return result
-
-    def get_third_client_id(self):
-        # Needed for login finalization
-        return Regexp(pattern=r"pasConfig:{.*:.*,clientId:\"(.*?)\"").filter(self.text)
-
     def get_third_client_id_for_cenet(self):
         return Regexp(pattern=r'client_id:"(.*?)"').filter(self.text)
 
@@ -161,12 +105,10 @@ class JsFilePage(RawPage):
     def get_nonce(self):
         return Regexp(pattern=r'\("nonce","([a-z0-9]+)"\)').filter(self.text)
 
-    def get_snid(self, bank):
-        self.get_class_b()
-        result = self.class_b.get(bank, {}).get("snippetId", NotAvailable)
-        assert result, f"Could not find SNIDs for {bank} in main JS, check if it has been updated"
-
-        return result
+    def get_snids(self):
+        result = Regexp(pattern=r"var i={[^}]*};var l=({[^}]*});", default=None).filter(self.text)
+        if result:
+            return chompjs.parse_js_object(result)
 
 
 class AuthorizePage(HTMLPage):

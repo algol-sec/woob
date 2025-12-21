@@ -253,11 +253,23 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         main_js_file = self.page.get_main_js_file_url()
         self.location(main_js_file)
 
-        if not self.snid:
-            self.snid = self.page.get_snid(self.enseigne.upper())
+        snids = self.page.get_snids()
+        gateway_access = self.page.get_json_gateway_access()
+        if not snids or not gateway_access:
+            for chunk_js_file in self.page.get_chunk_list():
+                self.location(chunk_js_file)
+                snids = snids or self.page.get_snids()
+                gateway_access = gateway_access or self.page.get_json_gateway_access()
+                if snids and gateway_access:
+                    break
+        assert snids, 'Could not find the definition of "snippetId"s, check if it has been updated'
+        assert gateway_access, 'Could not find "gatewayAccess:", check if it has been updated'
 
-        self.first_client_id = self.page.get_first_client_id()
-        self.second_client_id = self.page.get_second_client_id()
+        self.snid = snids.get(self.enseigne.upper())
+        assert self.snid, f"Could not find SNID for {self.enseigne.upper()}, check if it has been updated"
+
+        self.first_client_id = gateway_access.get("EXT-ATH", {}).get("anonymous", {}).get("clientId")
+        self.second_client_id = gateway_access.get("EXT-ATH", {}).get("authenticated", {}).get("clientId")
 
         if not self.cdetab or not self.connection_type:
             data = {
