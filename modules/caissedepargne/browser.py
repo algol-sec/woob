@@ -68,6 +68,7 @@ from .pages import (
     ExtranetReroutingPage,
     HomePage,
     JsFilePage,
+    JsonPage,
     LeaveLineBoursePage,
     LifeInsuranceHistory,
     LifeInsuranceInvestments,
@@ -120,6 +121,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
     config_page = URL(
         r"https://www.caisse-epargne.fr/ria/pas/configuration/config.json\?ts=(?P<timestamp>.*)", ConfigPage
     )
+    const_page = URL(r"https://www.caisse-epargne.fr/espace-client/assets/const_public_app.json", JsonPage)
     token_page = URL(r"https://www.as-ex-ano-groupe.caisse-epargne.fr/api/oauth/v2/token", TokenPage)
     login_api = URL(
         r"https://www.rs-ex-ano-groupe.caisse-epargne.fr/bapi/user/v1/users/identificationRouting", LoginApi
@@ -905,19 +907,12 @@ class CaisseEpargneLogin(TwoFactorBrowser):
             }
             self.home_page.go(params=params)
 
-            # Iterate over chunk-*.js files referenced in the main-XXXXXXXX.js file:
-            main_js_file = self.page.get_main_js_file_url()
-            self.location(main_js_file)
-            client_ids = []
-            for chunk_js_file in self.page.get_chunk_list():
-                self.location(chunk_js_file)
-                # Harvest double-quoted non-null UUIDs declared close to the "/se-connecter" URL:
-                client_ids.extend(self.page.get_uuids(prefix=r'/se-connecter.{2,1000}="', suffix='"'))
-            # Arbitrarily assume the first one is the good one:
-            if client_ids:
-                self.third_client_id = client_ids[0]
-            else:
-                self.third_client_id = self.page.get_third_client_id()
+            # Third client id is defined in pasConfig inside one of the chunks. In the
+            # chunk, it reference a variable which itself reference an anchor.
+            #   ...pasConfig:{...,clientId:_e...}...,_e="#CLIENT_PAS#",...
+            # So get client id directly from #CLIENT_PAS# in const_public_app.json page
+            self.const_page.go()
+            self.third_client_id = self.page.doc.get("#CLIENT_PAS#")
 
         self.login_hint = self.username
         if self.nuser:
