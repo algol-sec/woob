@@ -280,8 +280,11 @@ class SGEnterpriseBrowser(SGPEBrowser):
     unavailable = URL(r"/page-indisponible", UnavailablePage)
 
     # Bill
-    subscription = URL(r"/icd/syd-front/data/syd-rce-accederDepuisMenu.json", BankStatementPage)
-    subscription_search = URL(r"/icd/syd-front/data/syd-rce-lancerRecherche.json", BankStatementPage)
+    subscription = URL(r"/icd/epe/data/get-all-abonnements-proent-authsec.json", BankStatementPage)
+    subscription_search = URL(
+        r"/icd/epe/data/list-releves-proent-authsec.json\?b64e200_prestationIdTechnique=(?P<prestationIdTechnique>.+)&dt10_dateDebut=(?P<dateDebut>.+)&dt10_dateFin=(?P<dateFin>.+)",
+        BankStatementPage,
+    )
 
     # * Ent adapted URLs
     main_page = URL(r"https://entreprises.sg.fr", r"/sec/vk/gen_", MainPEPage)
@@ -318,7 +321,8 @@ class SGEnterpriseBrowser(SGPEBrowser):
         self.page.check_error()
 
         # set the max/min date to use them in iter_documents
-        self.date_min, self.date_max = self.page.get_min_max_date()
+        self.date_min, self.date_max = self.page.default_min_max_date()
+
         return self.page.iter_subscription(subscriber=subscriber)
 
     @need_login
@@ -326,35 +330,23 @@ class SGEnterpriseBrowser(SGPEBrowser):
         # This quality website can only fetch documents through a form, looking for dates
         # with a range of 3 months maximum
         search_date_max = self.date_max
-        search_date_min = None
+        search_date_min = self.date_min
         is_end = False
 
         # to avoid infinite loop
         counter = 0
 
-        while not is_end and counter < 50:
-            # search for every 2 months
-            search_date_min = search_date_max - relativedelta(months=2)
+        # As "new" woob developper, I remove the loop.
+        # FIXME : Add a 4 iterations loop, with dates 3 months older 4 times (to get full year)
 
-            if search_date_min < self.date_min:
-                search_date_min = self.date_min
-                is_end = True
+        self.subscription_search.go(
+            prestationIdTechnique=quote_plus(subscribtion.prestationIdTechnique),
+            dateDebut=search_date_min.strftime("%d/%m/%Y"),
+            dateFin=search_date_max.strftime("%d/%m/%Y"),
+        )
+        self.page.check_error()
 
-            if search_date_max <= self.date_min:
-                break
-
-            data = {
-                "dt10_dateDebut": search_date_min.strftime("%d/%m/%Y"),
-                "dt10_dateFin": search_date_max.strftime("%d/%m/%Y"),
-                "cl2000_comptes": '["%s"]' % subscribtion.id,
-                "cl200_typeRecherche": "ADVANCED",
-            }
-            self.subscription_search.go(data=data)
-
-            yield from self.page.iter_documents()
-
-            search_date_max = search_date_min - relativedelta(days=1)
-            counter += 1
+        yield from self.page.iter_documents(subscribtion)
 
 
 class SGProfessionalBrowser(SGPEBrowser):

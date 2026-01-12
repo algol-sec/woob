@@ -18,7 +18,7 @@
 # flake8: compatible
 
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import quote_plus
 
@@ -451,6 +451,13 @@ class BankStatementPage(SGPEJsonPage):
                 raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")
             raise AssertionError(f"Error {reason} is not handled yet")
 
+    def default_min_max_date(self):
+        ## Default dates are not provided, let's gess those
+        min_date = date.today() - timedelta(weeks=12)
+        max_date = date.today()
+        assert min_date and max_date, "There should have min date and max date to retrieve document"
+        return min_date, max_date
+
     def get_min_max_date(self):
         min_date = Date(Dict("donnees/criteres/dateMin"), dayfirst=True, default=None)(self.doc)
         max_date = Date(Dict("donnees/criteres/dateMax"), dayfirst=True, default=None)(self.doc)
@@ -459,31 +466,28 @@ class BankStatementPage(SGPEJsonPage):
 
     @method
     class iter_subscription(DictElement):
-        item_xpath = "donnees/comptes"
+        item_xpath = "donnees/abonnementsDto"
 
         class item(ItemElement):
             klass = Subscription
-
-            obj_id = Dict("id")
+            obj_id = Dict("prestationId")
             obj_label = Dict("libelle")
-            obj_subscriber = Env("subscriber")
+            obj_prestationIdTechnique = Dict("prestationIdTechnique")
 
-    def iter_documents(self):
-        (account,) = self.doc["donnees"]["comptes"]
-        statements = account["releves"]
-
-        for document in statements:
-            d = Document()
-            d.date = datetime.strptime(document["dateEdition"], "%d/%m/%Y")
-            d.label = "{} {}".format(account["libelle"], document["dateEdition"])
-            d.type = DocumentTypes.STATEMENT
-            d.format = "pdf"
-            d.id = "{}_{}".format(account["id"], document["dateEdition"].replace("/", ""))
-            d.url = "/icd/syd-front/data/syd-rce-telechargerReleve.html?b64e4000_sceau=%s" % quote_plus(
-                document["sceau"]
-            )
-
-            yield d
+    def iter_documents(self, subscription):
+        for relevesParDateEtAbonnements in self.doc["donnees"]["relevesParDateEtAbonnements"]:
+            for releveParDate in relevesParDateEtAbonnements["relevesParDate"]:
+                for r in releveParDate["releves"]:
+                    d = Document()
+                    d.date = datetime.strptime(releveParDate["dateReleves"], "%d/%m/%Y")
+                    d.label = ("{} {}".format(relevesParDateEtAbonnements["libelle"], r["dateEdition"]),)
+                    d.type = DocumentTypes.STATEMENT
+                    d.format = "pdf"
+                    d.id = "{}_{}".format(r["identifiant"], r["dateEdition"].replace("/", ""))
+                    d.url = "/icd/syd-front/data/syd-rce-telechargerReleve.html?b64e4000_sceau=%s" % quote_plus(
+                        r["sceau"]
+                    )
+                    yield d
 
 
 class MarketAccountPage(SGPEJsonPage):
