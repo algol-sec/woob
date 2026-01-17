@@ -484,9 +484,7 @@ class BankStatementPage(SGPEJsonPage):
                     d.type = DocumentTypes.STATEMENT
                     d.format = "pdf"
                     d.id = "{}_{}".format(r["identifiant"], r["dateEdition"].replace("/", ""))
-                    d.url = "/icd/syd-front/data/syd-rce-telechargerReleve.html?b64e4000_sceau=%s" % quote_plus(
-                        r["sceau"]
-                    )
+                    d.url = "/icd/epe/pdf/releve-proent-authsec.pdf?b64e4000_refTechnique=%s" % quote_plus(r["sceau"])
                     yield d
 
 
