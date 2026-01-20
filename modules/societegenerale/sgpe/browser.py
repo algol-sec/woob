@@ -331,10 +331,6 @@ class SGEnterpriseBrowser(SGPEBrowser):
         # with a range of 3 months maximum
         search_date_max = self.date_max
         search_date_min = self.date_min
-        is_end = False
-
-        # to avoid infinite loop
-        counter = 0
 
         # As "new" woob developper, I remove the loop.
         # FIXME : Add a 4 iterations loop, with dates 3 months older 4 times (to get full year)
