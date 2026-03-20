@@ -23,16 +23,15 @@ from io import BytesIO
 
 from PIL import Image, ImageFilter
 
-from woob.browser.filters.html import Attr, Link
+from woob.browser.filters.html import Link
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanText, Coalesce, Regexp
+from woob.browser.filters.standard import CleanText, Coalesce
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage, XMLPage
 from woob.capabilities import NotAvailable
 from woob.capabilities.base import NotLoaded
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 from woob.tools.captcha.virtkeyboard import SplitKeyboard
 from woob_modules.caissedepargne.pages import AuthenticationMethodPage as _AuthenticationMethodPage
-from woob_modules.caissedepargne.pages import JsFilePage as _JsFilePage
 from woob_modules.caissedepargne.pages import LoginTokensPage as _LoginTokensPage
 
 
@@ -124,71 +123,10 @@ class UnavailablePage(LoggedPage, MyHTMLPage):
         self.browser.location(a)
 
 
-class NewLoginPage(HTMLPage):
-    def get_main_js_file_url(self):
-        return Attr('//script[contains(@src, "main-")]', "src")(self.doc)
-
-
-class BaseJsFilePage(_JsFilePage):
-    BPCE_RESOURCE_PATTERN = (
-        r"https://www\.(?:rs|as)\-(?:ano|ext)\-bad\-(?:ib|ce)\.(?:banquepopulaire\.fr|caisse-epargne\.fr)"
-    )
-
-    def get_client_id_regexp(self):
-        result = r'{url}/api/oauth/v2/token",resourceServerUrl:"{url}(?:[^"]*)",clientId:"([^"]+)"'.format(
-            url=self.BPCE_RESOURCE_PATTERN
-        )
-        self.logger.debug("get_client_id_regexp(): %s", result)
-        return result
-
-
-class JsFilePage(BaseJsFilePage):
-    def getChunkList(self):
-        return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
-
-    def get_user_info_client_id(self):
-        return Regexp(pattern=self.get_client_id_regexp()).filter(self.text)
-
-
-class JsFilePageSeConnecterChunk(BaseJsFilePage):
-    def contains_oauth_token_client_id(self):
-        return bool(re.search(self.get_client_id_regexp(), self.text))
-
-    def get_oauth_token_client_id(self):
-        return Regexp(pattern=self.get_client_id_regexp()).filter(self.text)
-
-    def get_oauth_autorize_client_id(self):
-        return Regexp(pattern=r'authorizePath:"/api/oauth/v2/authorize",clientId:"([^"]+)"').filter(self.text)
-
-
-class RootDashBoardPage(HTMLPage):
-    def get_main_js_file_url_and_version(self):
-        match = re.search(r"main-[A-Z0-9]{8}\.js\?v=\d+\.\d+\.\d+", self.text).group(0)
-        if match:
-            left_part, right_part = match.split("?v=")
-            return left_part, right_part
-        raise BrowserUnavailable("Could not find main js file url into RootDashBoardPage, please raise an issue")
-
-
-class JsFilePageEspaceClient(_JsFilePage):
-    def getChunkList(self):
-        return re.findall(r"chunk-[A-Z0-9]{8}.js", self.text)
-
-
-class JsFilePageEspaceClientChunk(_JsFilePage):
-    def contains_client_id(self):
-        return bool(re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text))
-
-    def get_client_id(self):
-        match_e = re.search(r"[xXzZ]E=\"[a-z0-9-]{36}\"", self.text).group(0)
-        client_id = re.search(r"[a-z0-9-]{36}", match_e).group(0)
-        return client_id
-
-
 class KeysPage(JsonPage):
     def get_client_id(self):
         return Dict("#ANO_CLIENT_ID#")(self.doc)
-    
+
     def get_oauth_client_id(self):
         return Dict("#RIA_CLIENT_ID#")(self.doc)
 

@@ -28,6 +28,7 @@ from uuid import uuid4
 from woob.browser import URL, need_login
 from woob.browser.exceptions import ClientError, HTTPNotFound, ServerError
 from woob.browser.mfa import TwoFactorBrowser
+from woob.browser.pages import HTMLPage
 from woob.capabilities.bank import Account, Transaction
 from woob.capabilities.base import find_object
 from woob.exceptions import (
@@ -57,18 +58,12 @@ from .pages import (
     ErrorPage,
     HomePage,
     InfoTokensPage,
-    JsFilePage,
-    JsFilePageEspaceClient,
-    JsFilePageEspaceClientChunk,
-    JsFilePageSeConnecterChunk,
     KeysPage,
     LastConnectPage,
     LoggedOut,
     LoginPage,
     LoginTokensPage,
-    NewLoginPage,
     RedirectErrorPage,
-    RootDashBoardPage,
     SynthesePage,
     TransactionPage,
     UnavailablePage,
@@ -157,15 +152,11 @@ class BanquePopulaire(TwoFactorBrowser):
     first_login_page = URL(r"/$")
     new_first_login_page = URL(r"/se-connecter/sso", base="URL_ICG")
     login_page = URL(r"/auth/UI/Login.*", LoginPage, base="URL_ICG")
-    new_login = URL(r"/se-connecter/sso", NewLoginPage, base="URL_ICG")
-    js_file = URL(r"/.*se-connecter/main-.*.js$", JsFilePage, base="URL_ICG")
-    js_seconnecter_chunk = URL(r"/se-connecter/chunk-.*.js", JsFilePageSeConnecterChunk, base="URL_ICG")
-    js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
-    js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
+    new_login = URL(r"/se-connecter/sso", HTMLPage, base="URL_ICG")
     const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
     keys_pages_initial = URL(r"/se-connecter/assets/xld-keys.json", KeysPage, base="URL_ICG")
     keys_pages = URL(r"/espace-client/assets/xld-keys.json", KeysPage)
-    root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
+    root_clientdashboard_page = URL(r"/espace-client/", HTMLPage)
 
     authorize = URL(r"/api/oauth/v2/authorize", AuthorizePage, base="GW_AS_ENDPOINT_PAS")
     login_tokens = URL(r"/api/oauth/v2/consume", LoginTokensPage, base="GW_AS_ENDPOINT_PAS")
@@ -524,21 +515,6 @@ class BanquePopulaire(TwoFactorBrowser):
     # need to try from the top in that case because this login is a long chain of redirections
     @retry(TemporaryBrowserUnavailable)
     def do_new_login(self):
-        #main_js_file = self.page.get_main_js_file_url()
-        #self.location(main_js_file)
-
-        #oauth_token_client_id: str = ""
-        #oauth_autorize_client_id: str = ""
-        #chunk_list_urls = self.page.getChunkList()
-
-        # Retrieve the ids hidden in JS chunks
-        #for chunk_url in chunk_list_urls:
-        #    self.location(chunk_url)
-        #    if self.page.contains_oauth_token_client_id():
-        #        oauth_token_client_id = self.page.get_oauth_token_client_id()
-        #        oauth_autorize_client_id = self.page.get_oauth_autorize_client_id()
-        #        break
-
         headers = {
             "Accept": "*/*",
             "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
@@ -549,7 +525,7 @@ class BanquePopulaire(TwoFactorBrowser):
         except Exception as e:
             self.logger.debug(f"Error retrieving OAuth token client IDs (ANO_CLIENT_ID): {e}")
             raise BrowserUnavailable("Error retrieving OAuth token client IDs (ANO_CLIENT_ID)")
-        
+
         try:
             oauth_autorize_client_id = self.page.get_oauth_client_id()
         except Exception as e:
