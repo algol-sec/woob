@@ -187,7 +187,10 @@ class JsFilePageEspaceClientChunk(_JsFilePage):
 
 class KeysPage(JsonPage):
     def get_client_id(self):
-        return Dict("#CLIENT_ID_PAS#")(self.doc)
+        return Dict("#ANO_CLIENT_ID#")(self.doc)
+    
+    def get_oauth_client_id(self):
+        return Dict("#RIA_CLIENT_ID#")(self.doc)
 
 
 class ConstPage(JsonPage):

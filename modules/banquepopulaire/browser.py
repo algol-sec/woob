@@ -163,6 +163,7 @@ class BanquePopulaire(TwoFactorBrowser):
     js_espaceclient_file = URL(r"/espace-client/main.*.js", JsFilePageEspaceClient)
     js_espaceclient_chunk = URL(r"/espace-client/chunk-.*.js", JsFilePageEspaceClientChunk)
     const_page = URL(r"/espace-client/assets/const_public_app.json", ConstPage)
+    keys_pages_initial = URL(r"/se-connecter/assets/xld-keys.json", KeysPage, base="URL_ICG")
     keys_pages = URL(r"/espace-client/assets/xld-keys.json", KeysPage)
     root_clientdashboard_page = URL(r"/espace-client/", RootDashBoardPage)
 
@@ -523,28 +524,37 @@ class BanquePopulaire(TwoFactorBrowser):
     # need to try from the top in that case because this login is a long chain of redirections
     @retry(TemporaryBrowserUnavailable)
     def do_new_login(self):
-        main_js_file = self.page.get_main_js_file_url()
-        self.location(main_js_file)
+        #main_js_file = self.page.get_main_js_file_url()
+        #self.location(main_js_file)
 
-        oauth_token_client_id: str = ""
-        oauth_autorize_client_id: str = ""
-        chunk_list_urls = self.page.getChunkList()
+        #oauth_token_client_id: str = ""
+        #oauth_autorize_client_id: str = ""
+        #chunk_list_urls = self.page.getChunkList()
 
         # Retrieve the ids hidden in JS chunks
-        for chunk_url in chunk_list_urls:
-            self.location(chunk_url)
-            if self.page.contains_oauth_token_client_id():
-                oauth_token_client_id = self.page.get_oauth_token_client_id()
-                oauth_autorize_client_id = self.page.get_oauth_autorize_client_id()
-                break
+        #for chunk_url in chunk_list_urls:
+        #    self.location(chunk_url)
+        #    if self.page.contains_oauth_token_client_id():
+        #        oauth_token_client_id = self.page.get_oauth_token_client_id()
+        #        oauth_autorize_client_id = self.page.get_oauth_autorize_client_id()
+        #        break
 
-        if oauth_token_client_id == "":
-            self.logger.debug("No oauth_token_client_id found in chunks")
-            raise BrowserUnavailable("No oauth_token_client_id found in chunks")
-
-        if oauth_autorize_client_id == "":
-            self.logger.debug("No oauth_autorize_client_id found in chunks")
-            raise BrowserUnavailable("No oauth_autorize_client_id found in chunks")
+        headers = {
+            "Accept": "*/*",
+            "Referer": "https://www.icgauth.banquepopulaire.fr/se-connecter/sso?service=cyber",
+        }
+        self.keys_pages_initial.go(headers=headers)
+        try:
+            oauth_token_client_id = self.page.get_client_id()
+        except Exception as e:
+            self.logger.debug(f"Error retrieving OAuth token client IDs (ANO_CLIENT_ID): {e}")
+            raise BrowserUnavailable("Error retrieving OAuth token client IDs (ANO_CLIENT_ID)")
+        
+        try:
+            oauth_autorize_client_id = self.page.get_oauth_client_id()
+        except Exception as e:
+            self.logger.debug(f"Error retrieving OAuth authorize client ID (RIA_CLIENT_ID): {e}")
+            raise BrowserUnavailable("Error retrieving OAuth authorize client ID (RIA_CLIENT_ID)")
 
         nonce = str(uuid4())  # Not found anymore
 
