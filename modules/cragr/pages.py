@@ -245,6 +245,7 @@ ACCOUNT_TYPES = {
     "P SPE MOD": Account.TYPE_LOAN,
     "MT AUTRE": Account.TYPE_LOAN,  # Prêt d'investissement professionnel
     "PRET REAM.": Account.TYPE_LOAN,
+    "Prêt à 0% ministère du logement": Account.TYPE_LOAN,
     "épargne boursière": Account.TYPE_MARKET,
     "Compte Parts Sociales": Account.TYPE_MARKET,
     "assurance vie et capitalisation": Account.TYPE_LIFE_INSURANCE,
@@ -292,6 +293,7 @@ ACCOUNT_TYPES = {
     "PACR": Account.TYPE_CONSUMER_CREDIT,
     "PACV": Account.TYPE_CONSUMER_CREDIT,
     "PAC2": Account.TYPE_CONSUMER_CREDIT,
+    "Prêt à Consommer Confort": Account.TYPE_CONSUMER_CREDIT,
     "SUPPLETIS": Account.TYPE_REVOLVING_CREDIT,
     "OPEN": Account.TYPE_REVOLVING_CREDIT,
     "ATOUT LIB": Account.TYPE_REVOLVING_CREDIT,
