@@ -105,7 +105,8 @@ class CaisseEpargneLogin(TwoFactorBrowser):
     TWOFA_DURATION = 90 * 24 * 60
     STATE_DURATION = 10
     CENET_URL = "https://www.cenet.caisse-epargne.fr"
-    enseigne = "ce"
+    ENSEIGNE = "ce"
+    SNID = "224837"
 
     # In order to prevent child modules using their own BASEURL,
     # do not remove BASEURL from URLs here except if this URL is
@@ -122,6 +123,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         r"https://www.caisse-epargne.fr/ria/pas/configuration/config.json\?ts=(?P<timestamp>.*)", ConfigPage
     )
     const_page = URL(r"https://www.caisse-epargne.fr/espace-client/assets/const_public_app.json", JsonPage)
+    xld_keys_page = URL(r"https://www.icgauth.caisse-epargne.fr/se-connecter/assets/xld-keys.json", JsonPage)
     token_page = URL(r"https://www.as-ex-ano-groupe.caisse-epargne.fr/api/oauth/v2/token", TokenPage)
     login_api = URL(
         r"https://www.rs-ex-ano-groupe.caisse-epargne.fr/bapi/user/v1/users/identificationRouting", LoginApi
@@ -179,7 +181,6 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         self.connection_type = None
         self.cdetab = None
         self.csid = None
-        self.snid = None
         self.nonce = None
         self.second_client_id = None
         self.x_bpce_sessionid = None
@@ -250,28 +251,13 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         self.csid = str(uuid4())
         self.nonce = str(uuid4())
 
-        self.login.go(params={"service": "dei"})
-
-        main_js_file = self.page.get_main_js_file_url()
-        self.location(main_js_file)
-
-        snids = self.page.get_snids()
-        gateway_access = self.page.get_json_gateway_access()
-        if not snids or not gateway_access:
-            for chunk_js_file in self.page.get_chunk_list():
-                self.location(chunk_js_file)
-                snids = snids or self.page.get_snids()
-                gateway_access = gateway_access or self.page.get_json_gateway_access()
-                if snids and gateway_access:
-                    break
-        assert snids, 'Could not find the definition of "snippetId"s, check if it has been updated'
-        assert gateway_access, 'Could not find "gatewayAccess:", check if it has been updated'
-
-        self.snid = snids.get(self.enseigne.upper())
-        assert self.snid, f"Could not find SNID for {self.enseigne.upper()}, check if it has been updated"
-
-        self.first_client_id = gateway_access.get("EXT-ATH", {}).get("anonymous", {}).get("clientId")
-        self.second_client_id = gateway_access.get("EXT-ATH", {}).get("authenticated", {}).get("clientId")
+        self.xld_keys_page.go()
+        xld_keys = self.page.doc
+        assert xld_keys, "Could not find XLD config, check if it has been updated"
+        self.first_client_id = xld_keys.get("#ANO_CLIENT_ID#")
+        assert self.first_client_id, "Could not find first client id, check if it has been updated"
+        self.second_client_id = xld_keys.get("#RIA_CLIENT_ID#")
+        assert self.first_client_id, "Could not find second client id, check if it has been updated"
 
         if not self.cdetab or not self.connection_type:
             data = {
@@ -282,7 +268,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
             self.token_page.go(data=data)
 
             bank_id = ""
-            if self.enseigne != "ce":
+            if self.ENSEIGNE != "ce":
                 # bankId parent value is empty but it must
                 # be provided as the cdetab for child modules
                 bank_id = self.cdetab
@@ -291,7 +277,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
                 "characteristics": {
                     "iTEntityType": {
                         "code": "02",
-                        "label": self.enseigne.upper(),
+                        "label": self.ENSEIGNE.upper(),
                     },
                     "userCode": self.username,
                     "bankId": bank_id,
@@ -717,10 +703,10 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         return {
             "csid": csid,
             "typ_app": "rest",
-            "enseigne": self.enseigne,
+            "enseigne": self.ENSEIGNE,
             "typ_sp": "out-band",
             "typ_act": "auth",
-            "snid": snid,
+            "snid": self.SNID,
             "cdetab": self.cdetab,
             "typ_srv": self.connection_type,
             "phase": "",
@@ -733,7 +719,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
         # instead have a form that we can directly send to complete
         # the login.
 
-        bpcesta = self.get_bpcesta(self.csid, self.snid)
+        bpcesta = self.get_bpcesta(self.csid, self.SNID)
 
         params = {
             "nonce": self.nonce,
@@ -839,7 +825,7 @@ class CaisseEpargneLogin(TwoFactorBrowser):
                 {
                     "typ_sp": "out-band",
                     "cdetab": self.cdetab,
-                    "enseigne": self.enseigne,
+                    "enseigne": self.ENSEIGNE,
                     "login_hint": self.login_hint,
                     "typ_srv": self.connection_type,
                     "typ_app": "rest",
@@ -901,8 +887,8 @@ class CaisseEpargneLogin(TwoFactorBrowser):
                 "login_hint": self.username,
                 "typ_app": "rest",
                 "typ_sp": "out-band",
-                "enseigne": self.enseigne,
-                "snid": self.snid,
+                "enseigne": self.ENSEIGNE,
+                "snid": self.SNID,
                 "csid": self.csid,
             }
             self.home_page.go(params=params)
@@ -1110,7 +1096,7 @@ class CaisseEpargne(CaisseEpargneLogin):
                     "cdetab": self.cdetab,
                     "typ_srv": self.connection_type,
                     "typ_sp": "out-band",
-                    "enseigne": self.enseigne,
+                    "enseigne": self.ENSEIGNE,
                     "typ_app": "rest",
                     "typ_act": "sso",
                 },

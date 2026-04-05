@@ -22,7 +22,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 
-import chompjs
 from dateutil.parser import parse as parse_date
 from dateutil.tz import tz
 from PIL import Image, ImageFilter
@@ -82,11 +81,6 @@ class ConfigPage(JsonPage):
 
 
 class JsFilePage(RawPage):
-    def get_json_gateway_access(self):
-        result = Regexp(pattern=r",gatewayAccess:(.*),bpceConnectAccess:", default=None).filter(self.text)
-        if result:
-            return chompjs.parse_js_object(result)
-
     def get_chunk_list(self):
         return re.findall(r"\bchunk-[A-Z0-9]{8}.js\b", self.text)
 
@@ -104,11 +98,6 @@ class JsFilePage(RawPage):
 
     def get_nonce(self):
         return Regexp(pattern=r'\("nonce","([a-z0-9]+)"\)').filter(self.text)
-
-    def get_snids(self):
-        result = Regexp(pattern=r"var i={[^}]*};var l=({[^}]*});", default=None).filter(self.text)
-        if result:
-            return chompjs.parse_js_object(result)
 
 
 class AuthorizePage(HTMLPage):
