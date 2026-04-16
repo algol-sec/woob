@@ -306,6 +306,7 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
     dcam_config = URL(
         r"https://dcam.credit-agricole.fr/(?P<region>[\w-]+)/fe01/assets/configuration/app-config.json", LoanPage
     )
+    dcam_user = URL(r"https://dcam.credit-agricole.fr/(?P<region>[\w-]+)/bff01/security/user", JsonRedirectionPage)
     dcam_redirection = URL(r"https://dcam.credit-agricole.fr/(?P<region>[\w-]+)/(?P<action>.+)")
     loan_details = URL(
         r"https://dcam.credit-agricole.fr/(?P<region>[\w-]+)/(?P<action>.+)/credits/(?P<context_id>[\w.-]+)/",
@@ -852,8 +853,6 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
             yield card
 
     def go_loan_space(self, loan, space):
-        uuid_state = str(uuid.uuid4())
-
         self.token_page.go()
         header = {"CSRF-Token": self.page.get_token()}
         data = {
@@ -884,44 +883,43 @@ class CreditAgricoleBrowser(LoginBrowser, StatesMixin):
         params = {"context_id": context_id}
         self.dcam_redirection.go(region=self.region, action="fe01/", params=params)
 
+        # Get the server-assigned state from the user endpoint before calling authorize,
+        # mirroring the PDIK/predica flow. Using a client-generated state causes a 401
+        # on the subsequent login call.
+        self.dcam_user.go(region=self.region)
+        state = self.page.get_from_json("state")
+
         self.dcam_config.go(region=self.region)
         client_id = self.page.get_client_id()
 
+        redirect_uri = f"https://dcam.credit-agricole.fr/{self.region}/fe01/authorize"
         params = {
             "client_id": client_id,
-            "redirect_uri": f"https://dcam.credit-agricole.fr/{self.region}/fe01/authorize",
+            "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": "openid",
-            "state": uuid_state,
+            "state": state,
         }
         self.loan_auth.go(auth="authorize", params=params)
 
-        code = re.search(r"authorize\?code=(.*)&state=", self.url).group(1)
+        code = get_url_param(self.url, "code")
+        state = get_url_param(self.url, "state")
 
         # All the following dcam requests are necessary.
         # To access each loan details we have to follow this process:
-        # logout, authorize, user, login again and loan initialization.
-        self.dcam_redirection.go(region=self.region, action="bff01/security/logout", data="")
-
-        self.dcam_redirection.go(
-            region=self.region,
-            action="fe01/authorize",
-            params={
-                "state": uuid_state,
-                "code": code,
-            },
-        )
-        self.dcam_redirection.go(region=self.region, action="bff01/security/user")
+        # user, authorize, login and loan initialization.
         self.dcam_redirection.go(
             region=self.region,
             action="bff01/security/login",
             params={
-                "state": uuid_state,
                 "code": code,
-                "redirect_uri": f"https://dcam.credit-agricole.fr/{self.region}/fe01/authorize",
+                "redirect_uri": redirect_uri,
+                "state": state,
+                "canal": "",
             },
         )
         self.dcam_redirection.go(region=self.region, action=f"bff01/context/{context_id}")
+
         self.loan_details.go(region=self.region, action="bff01", context_id=context_id)
 
     def switch_account_to_loan(self, account, space):
