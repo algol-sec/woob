@@ -562,9 +562,6 @@ class AccountDetailsPage(LoggedPage, JsonPage):
             for bal_key in balance_keys:
                 if bal_key in el:
                     value = el[bal_key]
-
-                    if value is not None and bal_key == "montantRestantDu":
-                        value = -value
                     break
 
             if value is None:
