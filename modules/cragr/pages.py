@@ -305,6 +305,7 @@ ACCOUNT_TYPES = {
     "PERBANCGL": Account.TYPE_PER,
     "ESPSELEC 2": Account.TYPE_LIFE_INSURANCE,
     "Carré jaune ( CEL )": Account.TYPE_SAVINGS,
+    "Compte Sur Livret": Account.TYPE_SAVINGS,
     "Codebis": Account.TYPE_SAVINGS,
     "Compte dédié parts sociales": Account.TYPE_SAVINGS,
 }
