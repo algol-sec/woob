@@ -9,7 +9,7 @@
 #
 # This woob module is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
@@ -17,1163 +17,233 @@
 
 # flake8: compatible
 
-import json
 import re
-from decimal import Decimal
-from urllib.parse import urljoin
 
-from woob.browser.elements import DictElement, ItemElement, ListElement, method
-from woob.browser.filters.html import Attr, Link
-from woob.browser.filters.javascript import JSVar
+from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce
-from woob.browser.filters.standard import Currency as CleanCurrency
-from woob.browser.filters.standard import Date, Env, Eval, Field, Format, Lower, Map, MapIn, Regexp, Upper
-from woob.browser.pages import HTMLPage, JsonPage, LoggedPage
-from woob.capabilities import NotAvailable
-from woob.capabilities.bank import Account, AccountOwnership, AccountOwnerType
-from woob.capabilities.bank.wealth import Investment
-from woob.capabilities.base import empty
-from woob.capabilities.contact import Advisor
-from woob.capabilities.profile import Company, Person
-from woob.exceptions import ActionNeeded, BrowserPasswordExpired, ParseError
-from woob.tools.capabilities.bank.investments import IsinCode, IsinType, is_isin_valid
-from woob.tools.capabilities.bank.transactions import FrenchTransaction
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Env, Format
+from woob.browser.pages import JsonPage
+from woob.capabilities.bank import Account, Transaction
+from woob.capabilities.base import NotAvailable
+from woob.tools.date import parse_french_date
 
 
-ACCOUNT_OWNERSHIPS = {
-    "TITULAIRE": AccountOwnership.OWNER,
-    "COTITULAIRE": AccountOwnership.CO_OWNER,
-    "REPRESENTANT_LEGAL": AccountOwnership.ATTORNEY,
-    "MANDATAIRE": AccountOwnership.ATTORNEY,
+FAMILY_TYPES = {
+    "COMPTES": Account.TYPE_CHECKING,
+    "EPARGNE": Account.TYPE_SAVINGS,
+    "CREDITS": Account.TYPE_LOAN,
+    "PLACEMENTS": Account.TYPE_MARKET,
 }
 
-
-def float_to_decimal(f):
-    return Decimal(str(f))
-
-
-class Transaction(FrenchTransaction):
-    # this is only used to to find the rdate
-    PATTERNS = [
-        (re.compile(r"^(?P<category>PAIEMENT PAR CARTE) (?P<text>.*) (?P<dd>\d{2})/(?P<mm>\d{2})$"), None),
-        (re.compile(r"^(?P<category>PRELEVEMENT) (?P<text>.*) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) .*"), None),
-        (
-            re.compile(
-                r"^(?P<category>PRELEVEMENT) (?P<text>.*)(?<!\W\d{4}) (?P<dd>\d{2})\s(?P<mm>\d{2})\s(?P<yy>\d{4})(?:$|\s.*)"
-            ),
-            None,
-        ),
-        (
-            re.compile(
-                r"^(?P<category>VIREMENT EN VOTRE FAVEUR) (?P<text>.*) (?P<dd>3[01]|[12][0-9]|0[1-9])\.(?P<mm>1[0-2]|0[1-9])\.(?P<yy>\d{4})$"
-            ),
-            None,
-        ),
-        (
-            re.compile(
-                r"^(?P<category>REMBOURSEMENT DE PRET) (?P<text>.*) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2,4})$",
-            ),
-            None,
-        ),
-        (re.compile(r"^(?P<category>RETRAIT AU DISTRIBUTEUR) (?P<text>.*) (?P<dd>\d{2})/(?P<mm>\d{2}) .*"), None),
-        (
-            re.compile(
-                r"^(?P<category>PRELEVEMENT URSSAF) (?P<text>.*) (du)? (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{2,4})$"
-            ),
-            None,
-        ),
-        (
-            re.compile(r"^(?P<category>VERSEMENT D'ESPECES) (?P<text>.*) (?P<dd>\d{2})/(?P<mm>\d{2})/(?P<yy>\d{4}) .*"),
-            None,
-        ),
-        (re.compile(r"^(?P<category>PRELEVEMENT) (?P<text>.*) (?P<dd>\d{2})-(?P<mm>0[1-9]|1[012])$"), None),
-        (re.compile(r"^(?P<text>(?P<category>AVOIR) .*) (?P<dd>\d{2})/(?P<mm>\d{2})$"), None),
-    ]
-
-
-class KeypadPage(JsonPage):
-    def build_password(self, password):
-        # Fake Virtual Keyboard: just get the positions of each digit.
-        key_positions = [i for i in Dict("keyLayout")(self.doc)]
-        return str(",".join([str(key_positions.index(i)) for i in password]))
-
-    def get_keypad_id(self):
-        return Dict("keypadId")(self.doc)
-
-
-class LoginPage(HTMLPage):
-    def get_login_form(self, username, keypad_password, keypad_id):
-        form = self.get_form(id="loginForm")
-        form["j_username"] = username[:11]
-        form["j_password"] = keypad_password
-        form["keypadId"] = keypad_id
-        return form
-
-
-class LoggedOutPage(HTMLPage):
-    def is_here(self):
-        return self.doc.xpath('//b[text()="FIN DE CONNEXION"]')
-
-
-class FirstConnectionPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        message = CleanText('//p[contains(text(), "votre première visite")]')(self.doc)
-        if message:
-            raise ActionNeeded(message)
-
-
-class SecurityPage(JsonPage):
-    def get_accounts_url(self):
-        return Dict("url")(self.doc)
-
-
-class TokenPage(LoggedPage, JsonPage):
-    def get_token(self):
-        return Dict("token")(self.doc)
-
-
-class ChangePasswordPage(HTMLPage):
-    def on_load(self):
-        # Handle <p class="h1">Modifier mon code personnel&nbsp;</p>
-        # Handle <h1><span class="h1">Modifier&nbsp;votre code personnel</span></h1>
-        msg = CleanText('//*[@class="h1" and contains(text(), "code personnel")]')(self.doc)
-        if msg:
-            raise BrowserPasswordExpired(msg)
-
-
-class UpdateProfilePage(HTMLPage):
-    def get_action_message(self):
-        return CleanText('//div[@class="description"]')(self.doc)
-
-
-class TaxResidencyFillingPage(HTMLPage):
-    def get_action_needed_message(self):
-        return CleanText('//div[@class="warning"]/following-sibling::h1/div')(self.doc)
-
-
-class ContractsPage(LoggedPage, HTMLPage):
-    pass
-
-
-ACCOUNT_TYPES = {
-    "V O E CAPI": Account.TYPE_CAPITALISATION,
-    "ESPGESTCAP": Account.TYPE_CAPITALISATION,
-    "CCHQ": Account.TYPE_CHECKING,  # par
-    "CCOU": Account.TYPE_CHECKING,  # pro
-    "AUTO ENTRP": Account.TYPE_CHECKING,  # pro
-    "DEVISE USD": Account.TYPE_CHECKING,
-    "EKO": Account.TYPE_CHECKING,
-    "MAJPROTEGE": Account.TYPE_CHECKING,  # Compte majeur protégé
-    "LFDJ": Account.TYPE_CHECKING,  # Compte de mandataire LFDJ
-    "PMU": Account.TYPE_CHECKING,  # Compte PMU S.N.C. TISM
-    "DAV NANTI": Account.TYPE_SAVINGS,
-    "LIV A": Account.TYPE_SAVINGS,
-    "LIV A ASS": Account.TYPE_SAVINGS,
+# Affinage par libellé commercial quand il lève l'ambiguïté de la grande famille.
+LABEL_TYPES = {
+    "PEA": Account.TYPE_PEA,
     "Livret A": Account.TYPE_SAVINGS,
     "LDD": Account.TYPE_SAVINGS,
-    "LDD Solidaire": Account.TYPE_SAVINGS,
-    "Livret Engagé Sociétaire": Account.TYPE_SAVINGS,
     "PEL": Account.TYPE_SAVINGS,
     "CEL": Account.TYPE_SAVINGS,
-    "CEL2": Account.TYPE_SAVINGS,
-    "CODEBIS": Account.TYPE_SAVINGS,
-    "LJMO": Account.TYPE_SAVINGS,
-    "CSL": Account.TYPE_SAVINGS,
-    "LEP": Account.TYPE_SAVINGS,
-    "LEF": Account.TYPE_SAVINGS,
-    "TIWI": Account.TYPE_SAVINGS,
-    "CSL LSO": Account.TYPE_SAVINGS,
-    "CSL CSP": Account.TYPE_SAVINGS,
-    "DAV TIGERE": Account.TYPE_SAVINGS,
-    "CPTEXCPRO": Account.TYPE_SAVINGS,
-    "CPTEXCPRO2": Account.TYPE_SAVINGS,
-    "CPTEXCENT": Account.TYPE_SAVINGS,
-    "CPTEXCAGRI": Account.TYPE_SAVINGS,  # Compte Excédent Agriculture
-    "CPTDAV": Account.TYPE_SAVINGS,
-    "ORCH": Account.TYPE_SAVINGS,  # Orchestra / PEP
-    "CB": Account.TYPE_SAVINGS,  # Carré bleu / PEL
-    "LIS": Account.TYPE_SAVINGS,
-    "BOOSTE3": Account.TYPE_SAVINGS,
-    "BOOSTE4": Account.TYPE_SAVINGS,  # Livret d'Epargne Forteo
-    "PEPS": Account.TYPE_SAVINGS,  # Plan d'Epargne Populaire
-    "LIPROJAGRI": Account.TYPE_SAVINGS,
-    "épargne disponible": Account.TYPE_SAVINGS,
-    "LTA": Account.TYPE_SAVINGS,  # Livret Tandem
-    "DAT": Account.TYPE_DEPOSIT,
-    "DAT5": Account.TYPE_DEPOSIT,
-    "DPA": Account.TYPE_DEPOSIT,
-    "DATG": Account.TYPE_DEPOSIT,
-    "DATX": Account.TYPE_DEPOSIT,
-    "CEA": Account.TYPE_DEPOSIT,  # Dépôt à terme
-    "VAR": Account.TYPE_DEPOSIT,  # Dépôt à terme
-    "Dépôt à Terme": Account.TYPE_DEPOSIT,  # Dépôt à terme
-    "épargne à terme": Account.TYPE_DEPOSIT,
-    "Compte de Dépôt": Account.TYPE_DEPOSIT,
-    "PRET PERSO": Account.TYPE_LOAN,
-    "P. ENTREPR": Account.TYPE_LOAN,
-    "P. HABITAT": Account.TYPE_MORTGAGE,
-    "P. CONV.": Account.TYPE_LOAN,
-    "PRET 0%": Account.TYPE_LOAN,
-    "INV PRO": Account.TYPE_LOAN,
-    "TRES. PRO": Account.TYPE_LOAN,
-    "CT ATT HAB": Account.TYPE_LOAN,
-    "PRET CEL": Account.TYPE_LOAN,
-    "PRET PEL": Account.TYPE_LOAN,
-    "COLL. PUB": Account.TYPE_LOAN,
-    "P.ENTREPR.": Account.TYPE_LOAN,
-    "PEA": Account.TYPE_PEA,
-    "PEAP": Account.TYPE_PEA,
-    "DAV PEA": Account.TYPE_PEA,
-    "PEA VPRIVI": Account.TYPE_PEA,
-    "PEA VPATRI": Account.TYPE_PEA,
-    "CPS": Account.TYPE_MARKET,
-    "TITR": Account.TYPE_MARKET,
-    "TITR CTD": Account.TYPE_MARKET,
-    "ESPE INTEG": Account.TYPE_MARKET,
-    "PVERT VITA": Account.TYPE_PERP,
-    "réserves de crédit": Account.TYPE_CHECKING,
-    "prêts personnels": Account.TYPE_LOAN,
-    "crédits immobiliers": Account.TYPE_MORTGAGE,
-    "Prêt Tout Habitat": Account.TYPE_MORTGAGE,
-    "ESC COM.": Account.TYPE_LOAN,
-    "LIM TRESO": Account.TYPE_LOAN,
-    "P.ETUDIANT": Account.TYPE_LOAN,
-    "P. ACC.SOC": Account.TYPE_LOAN,
-    "CAU. BANC.": Account.TYPE_LOAN,
-    "CSAN": Account.TYPE_LOAN,
-    "P SPE MOD": Account.TYPE_LOAN,
-    "MT AUTRE": Account.TYPE_LOAN,  # Prêt d'investissement professionnel
-    "PRET REAM.": Account.TYPE_LOAN,
-    "Prêt à 0% ministère du logement": Account.TYPE_LOAN,
-    "épargne boursière": Account.TYPE_MARKET,
-    "Compte Parts Sociales": Account.TYPE_MARKET,
-    "assurance vie et capitalisation": Account.TYPE_LIFE_INSURANCE,
-    "PRED": Account.TYPE_LIFE_INSURANCE,
-    "PREDI9 S2": Account.TYPE_LIFE_INSURANCE,
-    "V.AVENIR": Account.TYPE_LIFE_INSURANCE,
-    "FLORIA": Account.TYPE_LIFE_INSURANCE,
-    "FLOR": Account.TYPE_LIFE_INSURANCE,
-    "CAP DECOUV": Account.TYPE_LIFE_INSURANCE,
-    "ESP LIB 2": Account.TYPE_LIFE_INSURANCE,
-    "AUTRO": Account.TYPE_LIFE_INSURANCE,  # Autre Contrats Rothschild
-    "OPPER": Account.TYPE_LIFE_INSURANCE,  # Open Perspective
-    "OPEN STRAT": Account.TYPE_LIFE_INSURANCE,  # Open Strategie
-    "ESPACELIB3": Account.TYPE_LIFE_INSURANCE,  # Espace Liberté 3
-    "ESPACE LIB": Account.TYPE_LIFE_INSURANCE,  # Espace Liberté
-    "ESPA. SELE": Account.TYPE_LIFE_INSURANCE,
-    "ASS OPPORT": Account.TYPE_LIFE_INSURANCE,  # Assurance fonds opportunité
-    "FLORIPRO": Account.TYPE_LIFE_INSURANCE,
-    "FLORIANE 2": Account.TYPE_LIFE_INSURANCE,
-    "FLORIAGRI": Account.TYPE_LIFE_INSURANCE,
-    "AST SELEC": Account.TYPE_LIFE_INSURANCE,
-    "PRGE": Account.TYPE_LIFE_INSURANCE,
-    "CONF": Account.TYPE_LIFE_INSURANCE,
-    "V O E": Account.TYPE_LIFE_INSURANCE,  # Vendome Optimum Euro
-    "VENDOME": Account.TYPE_LIFE_INSURANCE,  # Vendome Optimum Euro
-    "ESPGESTION": Account.TYPE_LIFE_INSURANCE,  # Espace Gestion
-    "ESPGESTPEP": Account.TYPE_LIFE_INSURANCE,  # Espace Gestion PEP
-    "OPTA": Account.TYPE_LIFE_INSURANCE,  # Optalissime
-    "RENV VITAL": Account.TYPE_LIFE_INSURANCE,  # Rente viagère Vitalité
-    "ANAE": Account.TYPE_LIFE_INSURANCE,
-    "PAT STH": Account.TYPE_LIFE_INSURANCE,  # Patrimoine ST Honoré
-    "PRSH2": Account.TYPE_LIFE_INSURANCE,  # Prestige ST Honoré 2
-    "PSH3C": Account.TYPE_LIFE_INSURANCE,  # Prestige ST Honoré 3
-    "CTT SOLID": Account.TYPE_LIFE_INSURANCE,  # predica
-    "PARAF": Account.TYPE_LIFE_INSURANCE,  # bgpi Paraphe
-    "PSHO3": Account.TYPE_LIFE_INSURANCE,  # Prestige ST Honoré 3
-    "ASTERINNOV": Account.TYPE_LIFE_INSURANCE,  # Aster Innovation
-    "AST EXCAP": Account.TYPE_CAPITALISATION,  # Excellence 2 Capitalisation
-    "AST EXC2": Account.TYPE_LIFE_INSURANCE,  # bgpi Aster excellence 2
-    "ACOR": Account.TYPE_LIFE_INSURANCE,  # Predica ACOR
-    "Prédissime 9 série 2": Account.TYPE_LIFE_INSURANCE,
-    "PACA": Account.TYPE_CONSUMER_CREDIT,  # 'PAC' = 'Prêt à consommer'
-    "PACC": Account.TYPE_CONSUMER_CREDIT,
-    "PACP": Account.TYPE_CONSUMER_CREDIT,
-    "PACR": Account.TYPE_CONSUMER_CREDIT,
-    "PACV": Account.TYPE_CONSUMER_CREDIT,
-    "PAC2": Account.TYPE_CONSUMER_CREDIT,
-    "Prêt à Consommer Confort": Account.TYPE_CONSUMER_CREDIT,
-    "SUPPLETIS": Account.TYPE_REVOLVING_CREDIT,
-    "OPEN": Account.TYPE_REVOLVING_CREDIT,
-    "ATOUT LIB": Account.TYPE_REVOLVING_CREDIT,
-    "PAGR": Account.TYPE_MADELIN,
-    "ACCOR MULT": Account.TYPE_MADELIN,
-    "PERASSUR": Account.TYPE_PER,
-    "PERBANCGP": Account.TYPE_PER,
-    "DAVPERBANC": Account.TYPE_PER,
-    "PERBANCGL": Account.TYPE_PER,
-    "ESPSELEC 2": Account.TYPE_LIFE_INSURANCE,
-    "Carré jaune ( CEL )": Account.TYPE_SAVINGS,
-    "Compte Sur Livret": Account.TYPE_SAVINGS,
-    "Codebis": Account.TYPE_SAVINGS,
-    "Compte dédié parts sociales": Account.TYPE_SAVINGS,
 }
 
-ACCOUNT_IS_LIQUIDITY = re.compile("compte especes? pea" + "|compte especes? titres")
-
-
-class AccountsPage(LoggedPage, JsonPage):
-    # actually, we parse the page as HTML, and lxml won't recognize utf-8-sig
-    ENCODING = "utf-8"
-
-    def build_doc(self, content):
-        # Store the HTML doc to count the number of spaces
-        self.html_doc = HTMLPage(self.browser, self.response).doc
-
-        # Transform the HTML tag containing the accounts list into a JSON
-        raw = re.search(r"syntheseController\.init\((.*)\)'>", content).group(1)
-        d = json.JSONDecoder()
-        # De-comment this line to debug the JSON accounts:
-        # print(json.dumps(d.raw_decode(raw)[0]))
-        return d.raw_decode(raw)[0]
-
-    def count_spaces(self):
-        """The total number of spaces corresponds to the number
-        of available space choices plus the one we are on now.
-        Some professional connections have a very specific xpath
-        so we must look for nodes with 'idBamIndex' as well as
-        "HubAccounts-link--cael" otherwise there might be space duplicates."""
-        return (
-            len(
-                self.html_doc.xpath(
-                    '//a[contains(@class, "HubAccounts-link--cael") and contains(@href, "idBamIndex=")]'
-                )
-            )
-            + 1
-        )
-
-    def get_space_type(self):
-        return Dict("marche")(self.doc)
-
-    def get_owner_type(self):
-        OWNER_TYPES = {
-            "PARTICULIER": AccountOwnerType.PRIVATE,
-            "HORS_MARCHE": AccountOwnerType.PRIVATE,
-            "PROFESSIONNEL": AccountOwnerType.ORGANIZATION,
-            "AGRICULTEUR": AccountOwnerType.ORGANIZATION,
-            "PROMOTEURS": AccountOwnerType.ORGANIZATION,
-            "ENTREPRISE": AccountOwnerType.ORGANIZATION,
-            "PROFESSION_LIBERALE": AccountOwnerType.ORGANIZATION,
-            "ASSOC_CA_MODERE": AccountOwnerType.ORGANIZATION,
-        }
-        return OWNER_TYPES.get(Dict("marche")(self.doc), NotAvailable)
-
-    def get_connection_id(self):
-        connection_id = Regexp(
-            CleanText('//script[contains(text(), "NPC.utilisateur.ccptea")]'), r"NPC.utilisateur.ccptea = '(\d+)';"
-        )(self.html_doc)
-        return connection_id
-
-    def has_main_account(self):
-        return Dict("comptePrincipal", default=None)(self.doc)
-
-    def has_profile_details(self):
-        return CleanText('//a[text()="Gérer mes coordonnées"]')(self.html_doc)
-
-    @method
-    class get_main_account(ItemElement):
-        klass = Account
-
-        obj_id = CleanText(Dict("comptePrincipal/numeroCompte"))
-        obj_number = CleanText(Dict("comptePrincipal/numeroCompte"))
-
-        def obj_owner_type(self):
-            return self.page.get_owner_type()
-
-        def obj_label(self):
-            if Field("owner_type")(self) == AccountOwnerType.PRIVATE:
-                # All the accounts have the same owner if it is private,
-                # so adding the owner in the libelle is useless.
-                return CleanText(Dict("comptePrincipal/libelleProduit"))(self)
-            return Format(
-                "%s %s",
-                CleanText(Dict("comptePrincipal/libelleProduit")),
-                CleanText(Dict("comptePrincipal/libelleCompte")),
-            )(self)
-
-        def obj_balance(self):
-            balance = Dict("comptePrincipal/solde", default=NotAvailable)(self)
-            if not empty(balance):
-                return Eval(float_to_decimal, balance)(self)
-            return NotAvailable
-
-        obj_currency = CleanCurrency(Dict("comptePrincipal/idDevise"))
-        obj_ownership = Map(
-            CleanText(Dict("comptePrincipal/rolePartenaireCalcule")), ACCOUNT_OWNERSHIPS, default=NotAvailable
-        )
-        obj__index = Dict("comptePrincipal/index")
-        obj__category = Dict("comptePrincipal/grandeFamilleProduitCode", default=None)
-        obj__id_element_contrat = CleanText(Dict("comptePrincipal/idElementContrat"))
-
-        def obj_type(self):
-            _type = Map(CleanText(Dict("comptePrincipal/libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
-            if _type == Account.TYPE_UNKNOWN:
-                self.logger.warning(
-                    'We got an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                    CleanText(Dict("comptePrincipal/libelleProduit"))(self),
-                )
-            return _type
-
-    def has_main_cards(self):
-        return Dict("comptePrincipal/cartesDD", default=None)(self.doc)
-
-    @method
-    class iter_main_cards(DictElement):
-        item_xpath = "comptePrincipal/cartesDD"
-        # Sometimes the server sends a list of cards containing a duplicate json's object
-        # This will just send a warning instead raising an error
-        ignore_duplicate = True
-
-        class item(ItemElement):
-            # Main account cards are all deferred and their
-            # coming is already displayed with a '-' sign.
-
-            klass = Account
-
-            def condition(self):
-                card_situation = Dict("codeSituationCarte")(self)
-                if card_situation not in (5, 7):
-                    # Cards with codeSituationCarte equal to 7 are active and present on the website
-                    # Cards with codeSituationCarte equal to 5 are absent on the website, we skip them
-                    self.logger.warning(
-                        "codeSituationCarte unknown, Check if the %s card is present on the website", Field("id")(self)
-                    )
-                return card_situation != 5
-
-            obj_id = CleanText(Dict("idCarte"), replace=[(" ", "")])
-
-            obj_number = Field("id")
-            obj_label = Format("Carte %s %s", Field("id"), CleanText(Dict("titulaire")))
-            obj_type = Account.TYPE_CARD
-            obj_coming = Eval(float_to_decimal, Dict("encoursCarteM"))
-            obj_balance = Decimal(0)
-            obj__index = Dict("index")
-            obj__id_element_contrat = None
-
-    @method
-    class iter_accounts(DictElement):
-        item_xpath = "grandesFamilles/*/elementsContrats"
-
-        class item(ItemElement):
-            IGNORED_ACCOUNT_FAMILIES = (
-                "MES ASSURANCES",
-                "VOS ASSURANCES",
-            )
-
-            klass = Account
-
-            def obj_id(self):
-                # Loan/credit ids may be duplicated so we use the contract number for now:
-                if Field("type")(self) in (
-                    Account.TYPE_LOAN,
-                    Account.TYPE_CONSUMER_CREDIT,
-                    Account.TYPE_REVOLVING_CREDIT,
-                    Account.TYPE_MORTGAGE,
-                ):
-                    return CleanText(Dict("idElementContrat"))(self)
-                return CleanText(Dict("numeroCompte"))(self)
-
-            obj_ownership = Map(CleanText(Dict("rolePartenaireCalcule")), ACCOUNT_OWNERSHIPS, default=NotAvailable)
-            obj_number = CleanText(Dict("numeroCompte"))
-            obj_currency = CleanCurrency(Dict("idDevise"))
-            obj__index = Dict("index")
-            obj__category = Coalesce(
-                Dict("grandeFamilleProduitCode", default=None),
-                Dict("sousFamilleProduit/niveau", default=None),
-                default=None,
-            )
-            obj__id_element_contrat = CleanText(Dict("idElementContrat"))
-
-            def obj_owner_type(self):
-                return self.page.get_owner_type()
-
-            def obj_label(self):
-                if Field("owner_type")(self) == AccountOwnerType.PRIVATE:
-                    # All the accounts have the same owner if it is private,
-                    # so adding the owner in the libelle is useless.
-                    return CleanText(Dict("libelleProduit"))(self)
-                return Format(
-                    "%s %s",
-                    CleanText(Dict("libelleProduit")),
-                    CleanText(Dict("libelleCompte")),
-                )(self)
-
-            def obj_type(self):
-                if CleanText(Dict("libelleProduit"))(self) in ("HABITATION",):
-                    # No need to log warning for "assurance" accounts
-                    return NotAvailable
-                _type = Map(CleanText(Dict("libelleProduit")), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)(self)
-
-                # MANDAT CTO Vendôme matches TYPE_LIFE_INSURANCE, although it's a TYPE_MARKET
-                if _type == Account.TYPE_LIFE_INSURANCE and "MANDAT CTO" in CleanText(Dict("libelleProduit"))(self):
-                    _type = Account.TYPE_MARKET
-
-                if _type == Account.TYPE_UNKNOWN:
-                    self.logger.warning(
-                        'There is an untyped account: please add "%s" to ACCOUNT_TYPES.',
-                        CleanText(Dict("libelleProduit"))(self),
-                    )
-                return _type
-
-            def obj_balance(self):
-                balance = Dict("solde", default=None)(self)
-                if balance:
-                    return Eval(float_to_decimal, balance)(self)
-                # We will fetch the balance with account_details
-                return NotAvailable
-
-            def obj__is_liquidity(self):
-                # Liquidities are fetched like an account as shown on the site
-                # This attribute will be used to create_french_liquidity
-                label = Lower(Field("label"), transliterate=True)(self)
-                return ACCOUNT_IS_LIQUIDITY.match(label)
-
-            def condition(self):
-                # Ignore insurances (plus they all have identical IDs)
-                # Ignore some credits not displayed on the website
-                return (
-                    Upper(Dict("familleProduit/libelle", default=""))(self) not in self.IGNORED_ACCOUNT_FAMILIES
-                    and "non affiche" not in CleanText(Dict("sousFamilleProduit/libelle", default=""))(self)
-                    and "Inactif" not in CleanText(Dict("libelleSituationContrat", default=""))(self)
-                )
-
-
-class AccountDetailsPage(LoggedPage, JsonPage):
-    def get_account_balances(self):
-        # We use the 'idElementContrat' key because it is unique
-        # whereas the account id may not be unique for Loans
-        balance_keys = (
-            "solde",
-            "encoursActuel",
-            "valorisationContrat",
-            "montantRestantDu",
-            "capitalDisponible",
-            "montantUtilise",
-            "montantPlafondAutorise",
-        )
-
-        account_balances = {}
-        for el in self.doc:
-            # Insurances have no balance, we skip them
-            if el.get("typeProduit") == "assurance":
-                continue
-
-            value = None
-            for bal_key in balance_keys:
-                if bal_key in el:
-                    value = el[bal_key]
-                    break
-
-            if value is None:
-                continue
-
-            account_balances[Dict("idElementContrat")(el)] = float_to_decimal(value)
-
-        return account_balances
-
-    def get_loan_ids(self):
-        # We use the 'idElementContrat' key because it is unique
-        # whereas the account id may not be unique for Loans
-        loan_ids = {}
-        for el in self.doc:
-            if el.get("numeroCredit"):
-                # Loans
-                loan_ids[Dict("idElementContrat")(el)] = Dict("numeroCredit")(el)
-                loan_ids["numeroCompte"] = Dict("numeroCompte")(el)
-            elif el.get("numeroContrat"):
-                # Revolving credits
-                loan_ids[Dict("idElementContrat")(el)] = Dict("numeroContrat")(el)
-            elif el.get("numeroPret"):
-                # Some pro Loans
-                loan_ids[Dict("idElementContrat")(el)] = Dict("numeroPret")(el)
-                loan_ids["numeroCompte"] = Dict("numeroCompte")(el)
-        return loan_ids
-
-
-class IbanPage(LoggedPage, JsonPage):
-    def build_doc(self, content):
-        # dict can have missing ending '"'
-        # ex: '..."faxNumber":"},...'
-        content = content.replace(':"}', ':""}')
-        # ex: '..."phoneNumber":",...'
-        content = re.sub(r'":","(?![,}])', '":"","', content)
-        return super().build_doc(content)
-
-    def get_iban(self):
-        return Coalesce(
-            Dict("ibanData/ibanCode", default=NotAvailable),
-            Dict("ibanData/ibanData/ibanCode", default=NotAvailable),
-        )(self.doc)
-
-
-class HistoryPage(LoggedPage, JsonPage):
-    def has_next_page(self):
-        return Dict("hasNext")(self.doc)
-
-    def get_next_index(self):
-        return Dict("nextSetStartIndex")(self.doc)
-
-    def has_history_transactions(self):
-        return Dict("count")(self.doc)
-
-    @method
-    class iter_history(DictElement):
-        item_xpath = "listeOperations"
-
-        class item(ItemElement):
-
-            TRANSACTION_TYPES = {
-                "PAIEMENT PAR CARTE": FrenchTransaction.TYPE_CARD,
-                "REMISE CARTE": FrenchTransaction.TYPE_CARD,
-                "PRELEVEMENT CARTE": FrenchTransaction.TYPE_CARD_SUMMARY,
-                "RETRAIT AU DISTRIBUTEUR": FrenchTransaction.TYPE_WITHDRAWAL,
-                "RETRAIT MUR D'ARGENT": FrenchTransaction.TYPE_WITHDRAWAL,
-                "FRAIS": FrenchTransaction.TYPE_BANK,
-                "COTISATION": FrenchTransaction.TYPE_BANK,
-                "VIREMENT": FrenchTransaction.TYPE_TRANSFER,
-                "VIREMENT EN VOTRE FAVEUR": FrenchTransaction.TYPE_TRANSFER,
-                "VIREMENT EMIS": FrenchTransaction.TYPE_TRANSFER,
-                "CHEQUE EMIS": FrenchTransaction.TYPE_CHECK,
-                "REMISE DE CHEQUE": FrenchTransaction.TYPE_DEPOSIT,
-                "PRELEVEMENT": FrenchTransaction.TYPE_ORDER,
-                "PRELEVT": FrenchTransaction.TYPE_ORDER,
-                "PRELEVMNT": FrenchTransaction.TYPE_ORDER,
-                "REMBOURSEMENT DE PRET": FrenchTransaction.TYPE_LOAN_PAYMENT,
-                "REMISE D'EFFETS": FrenchTransaction.TYPE_PAYBACK,
-                "AVOIR": FrenchTransaction.TYPE_PAYBACK,
-                "VERSEMENT D'ESPECES": FrenchTransaction.TYPE_CASH_DEPOSIT,
-                "INTERETS CREDITEURS": FrenchTransaction.TYPE_BANK,
-            }
-
-            klass = Transaction
-
-            # There are 2 values in the json, dateOperation and dateValeur.
-            # On the website they always display dateOperation.
-            # dateValeur seems to be arbitrary (it is sometimes before the real
-            # rdate of some transactions, which doesn't make any sense) so
-            # we do not use it.
-            obj_date = Date(CleanText(Dict("dateOperation")))
-
-            obj_label = CleanText(
-                Format(
-                    "%s %s", CleanText(Dict("libelleTypeOperation", default="")), CleanText(Dict("libelleOperation"))
-                )
-            )
-
-            # Transactions in foreign currencies have no 'libelleTypeOperation'
-            # and 'libelleComplementaire' keys, hence the default values.
-            # The CleanText() gets rid of additional spaces.
-            def obj_raw(self):
-                raw = CleanText(
-                    Format(
-                        "%s %s %s",
-                        CleanText(Dict("libelleTypeOperation", default="")),
-                        CleanText(Dict("libelleOperation")),
-                        CleanText(Dict("libelleComplementaire", default="")),
-                    )
-                )
-
-                try:
-                    return Transaction.Raw(raw)(self)
-                # Some date in transactions labels can cause troubles
-                # So just setting rdate to NotAvailable
-                except ParseError:
-                    # Either a bad date, like November 31st
-                    self.obj.rdate = NotAvailable
-                    return raw(self)
-                except ValueError as err:
-                    if "month must be in" in str(err):
-                        # Or not well formated
-                        # Such has 0212121...
-                        self.obj.rdate = NotAvailable
-                        return raw(self)
-                    raise
-
-            def obj_type(self):
-                return MapIn(Field("raw"), self.TRANSACTION_TYPES, Transaction.TYPE_UNKNOWN)(self)
-
-            # If the patterns do not find the rdate in the label, we set the value
-            # of rdate to date (dateOperation).
-            def obj_rdate(self):
-                date = Field("date")(self)
-                # rdate is already set by `obj_raw` and the patterns.
-                rdate = self.obj.rdate
-                if empty(rdate) or rdate.year < 1970 or abs(rdate.year - date.year) >= 2 or rdate > date:
-                    # website can send wrong date in label used to build rdate
-                    # ex: "VIREMENT EN VOTRE FAVEUR TOTO 19.03.1214"
-                    return NotAvailable
-                elif rdate != date:
-                    return rdate
-                return date
-
-            obj_amount = Eval(float_to_decimal, Dict("montant"))
-
-
-class CardsPage(LoggedPage, JsonPage):
-    @method
-    class iter_card_parents(DictElement):
-        item_xpath = "comptes"
-
-        class iter_cards(DictElement):
-            item_xpath = "listeCartes"
-            # Sometimes the server sends a list of cards containing a duplicate json's object
-            # This will just send a warning instead raising an error
-            ignore_duplicate = True
-
-            def parse(self, el):
-                self.env["parent_id"] = Dict("idCompte")(el)
-
-            class item(ItemElement):
-                klass = Account
-
-                obj_id = CleanText(Dict("idCarte"), replace=[(" ", "")])
-
-                def condition(self):
-                    assert CleanText(Dict("codeTypeDebitPaiementCarte"))(self) in ("D", "I")
-                    return CleanText(Dict("codeTypeDebitPaiementCarte"))(self) == "D"
-
-                obj_label = Format("Carte %s %s", Field("id"), CleanText(Dict("titulaire")))
-                obj_type = Account.TYPE_CARD
-                obj_coming = Eval(lambda x: -float_to_decimal(x), Dict("encoursCarteM"))
-                obj_balance = CleanDecimal(0)
-                obj__parent_id = Env("parent_id")
-                obj__index = Dict("index")
-                obj__id_element_contrat = None
-
-
-class CardHistoryPage(LoggedPage, JsonPage):
-    @method
-    class iter_card_history(DictElement):
-        item_xpath = None
-
-        class item(ItemElement):
-            klass = Transaction
-
-            obj_label = CleanText(Dict("libelleOperation"))
-            obj_raw = Transaction.Raw(CleanText(Dict("libelleOperation")))
-            obj_amount = Eval(float_to_decimal, Dict("montant"))
-            obj_type = Transaction.TYPE_DEFERRED_CARD
-            obj_bdate = Field("rdate")
-            obj_date = Date(Dict("datePrelevement"))
-            obj_rdate = Date(Dict("dateOperation"))
-
-
-class NetfincaRedirectionPage(LoggedPage, HTMLPage):
-    def get_url(self):
-        return Regexp(Attr("//body", "onload"), r'document.location="([^"]+)"')(self.doc)
-
-
-class NetfincaHomePage(LoggedPage, HTMLPage):
-    pass
-
-
-class NetfincaLogoutToCragrPage(LoggedPage, HTMLPage):
-    pass
-
-
-class PredicaRedirectionPage(LoggedPage, HTMLPage):
-    def on_load(self):
-        form = self.get_form()
-        form.submit()
-
-
-class PredicaInvestmentsPage(LoggedPage, JsonPage):
-    @method
-    class iter_investments(DictElement):
-        item_xpath = "listeSupports/support"
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_label = CleanText(Dict("lcspt"))
-            obj_valuation = Eval(float_to_decimal, Dict("mtvalspt"))
-
-            def obj_portfolio_share(self):
-                portfolio_share = Dict("txrpaspt", default=None)(self)
-                if portfolio_share:
-                    return Eval(lambda x: float_to_decimal(x / 100), portfolio_share)(self)
-                return NotAvailable
-
-            def obj_unitvalue(self):
-                unit_value = Dict("mtliqpaaspt", default=None)(self)
-                if unit_value:
-                    return Eval(float_to_decimal, unit_value)(self)
-                return NotAvailable
-
-            def obj_quantity(self):
-                quantity = Dict("qtpaaspt", default=None)(self)
-                if quantity:
-                    return Eval(float_to_decimal, quantity)(self)
-                return NotAvailable
-
-            def obj_diff(self):
-                diff = Dict("mtpmvspt", default=None)(self)
-                if diff is not None:
-                    return Eval(float_to_decimal, diff)(self)
-                return NotAvailable
-
-            def obj_code(self):
-                code = Dict("cdsptisn")(self)
-                if is_isin_valid(code):
-                    return code
-                return NotAvailable
-
-            def obj_code_type(self):
-                if is_isin_valid(Field("code")(self)):
-                    return Investment.CODE_TYPE_ISIN
-                return NotAvailable
-
-
-class LifeInsuranceInvestmentsPage(LoggedPage, HTMLPage):
-    @method
-    class iter_investments(ListElement):
-        item_xpath = '//div[@id="menu1"]/div'
-
-        class item(ItemElement):
-            klass = Investment
-
-            obj_label = CleanText('.//div[has-class("PrivateBank-tabsNavContentTitle")]')
-            obj_valuation = CleanDecimal.French('.//div[contains(text(), "Valorisation")]/span')
-            obj_quantity = CleanDecimal.French(
-                './/div[contains(text(), "Nombre de parts")]/following-sibling::div[1]', default=NotAvailable
-            )
-            obj_unitvalue = CleanDecimal.French(
-                './/div[contains(text(), "Valeur de la part")]/following-sibling::div[1]', default=NotAvailable
-            )
-            obj_diff = CleanDecimal.French('.//div[contains(text(), "+/- values")]/span', default=NotAvailable)
-
-            def obj_portfolio_share(self):
-                portfolio_share = CleanDecimal.French(
-                    './/div[has-class("PrivateBank-tabsNavContentTitle")]/following-sibling::div/span',
-                    default=NotAvailable,
-                )(self)
-                if not empty(portfolio_share):
-                    return Eval(lambda x: x / 100, portfolio_share)(self)
-                return NotAvailable
-
-
-class BgpiRedirectionPage(LoggedPage, HTMLPage):
-    def get_bgpi_url(self):
-        # The HTML is broken so we cannot use a regular Attr('xpath')
-        m = re.search(r'document.location="([^"]+)"', self.text)
-        if m:
-            return m.group(1)
-
-
-class BgpiAccountsPage(LoggedPage, HTMLPage):
-    def get_account_url(self, account_id):
-        url = Link('//a[div[div[span[span[contains(text(), "%s")]]]]]' % account_id, default=None)(self.doc)
-        if url:
-            return urljoin("https://bgpi-gestionprivee.credit-agricole.fr", url)
-
-
-class BgpiInvestmentsPage(LoggedPage, HTMLPage):
-    @method
-    class iter_investments(ListElement):
-        item_xpath = "//div[div[ul[count(li) > 5]]]"
-
-        class item(ItemElement):
-
-            klass = Investment
-
-            obj_label = CleanText('.//span[@class="uppercase"]')
-            obj_code = IsinCode(CleanText('.//span[@class="cl-secondary"]'), default=NotAvailable)
-            obj_code_type = IsinType(CleanText('.//span[@class="cl-secondary"]'), default=NotAvailable)
-            obj_valuation = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Montant estimé"]]]/span[2]/span'
-            )
-            obj_quantity = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Nombre de part"]]]/span[2]/span'
-            )
-            obj_unitvalue = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Valeur liquidative"]]]/span[2]/span', default=NotAvailable
-            )
-            obj_unitprice = CleanDecimal.French(
-                './/span[@class="box"][span[span[text()="Prix de revient"]]]/span[2]/span', default=NotAvailable
-            )
-            obj_portfolio_share = Eval(
-                lambda x: x / 100,
-                CleanDecimal.French('.//span[@class="box"][span[span[text()="Répartition"]]]/span[2]/span'),
-            )
-
-            def obj_diff_ratio(self):
-                # Euro funds have '-' instead of a diff_ratio value
-                text = CleanText('.//span[@class="box"][span[span[text()="+/- value latente (%)"]]]/span[2]/span')(self)
-                if text in ("", "-"):
-                    return NotAvailable
-                return Eval(
-                    lambda x: x / 100,
-                    CleanDecimal.French(
-                        './/span[@class="box"][span[span[text()="+/- value latente (%)"]]]/span[2]/span',
-                    ),
-                )(self)
-
-            def obj_diff(self):
-                if Field("diff_ratio")(self) == NotAvailable:
-                    return NotAvailable
-                return CleanDecimal.French(
-                    './/span[@class="box"][span[span[text()="+/- value latente"]]]/span[2]/span'
-                )(self)
-
-
-class ProfilePage(LoggedPage, JsonPage):
-    @method
-    class get_user_profile(ItemElement):
-        klass = Person
-
-        obj_name = CleanText(Dict("displayName", default=NotAvailable))
-        obj_birth_date = Date(Dict("birthdate", default=NotAvailable))
-
-    @method
-    class get_company_profile(ItemElement):
-        klass = Company
-
-        obj_name = CleanText(Dict("displayName", default=NotAvailable))
-        obj_registration_date = Date(Dict("birthdate", default=NotAvailable))
-
-    @method
-    class get_advisor(ItemElement):
-        klass = Advisor
-
-        def obj_name(self):
-            # If no advisor is displayed, we return the agency advisor.
-            if Dict("advisorGivenName")(self) and Dict("advisorFamilyName")(self):
-                return Format("%s %s", CleanText(Dict("advisorGivenName")), CleanText(Dict("advisorFamilyName")))(self)
-            return Format(
-                "%s %s", CleanText(Dict("branchManagerGivenName")), CleanText(Dict("branchManagerFamilyName"))
-            )(self)
-
-
-class ProfileDetailsPage(LoggedPage, HTMLPage):
-    @method
-    class fill_profile(ItemElement):
-        obj_email = CleanText('//p[contains(@class, "Data mail")]', default=NotAvailable)
-        obj_address = CleanText('//p[strong[contains(text(), "Adresse")]]/text()[2]', default=NotAvailable)
-
-    @method
-    class fill_advisor(ItemElement):
-        obj_phone = CleanText(
-            '//div[@id="blockConseiller"]//a[contains(@class, "advisorNumber")]', default=NotAvailable
-        )
-
-
-class ProProfileDetailsPage(ProfileDetailsPage):
-    pass
-
-
-class LoanRedirectionPage(LoggedPage, HTMLPage):
-    def get_context_id(self):
-        return Regexp(CleanText("//script"), r"context_id=([\w.-]+)")(self.doc)
-
-    def get_ca_connect_url(self):
-        # url has already built with all necessary params
-        return Attr("//iframe", "src")(self.doc)
-
-
-class LoanPage(LoggedPage, JsonPage):
-    def get_auth_url(self):
-        # Page contains just only one string with url
-        return self.doc
-
+# Le BFF décrit le type d'opération en clair dans libelleTypeOperation ("PAIEMENT PAR
+# CARTE", "PRELEVEMENT", "VIREMENT EMIS"...). On le mappe vers les types woob pour que
+# l'export (OFX TRNTYPE) et l'affichage gardent le bon type, sans recopier ce libellé
+# dans le label de l'opération (sinon il pollue le champ bénéficiaire à l'import).
+# L'ordre compte : les frais sont testés avant CARTE (une cotisation carte reste BANK)
+# et REMISE avant CHEQUE (une remise de chèque est un dépôt, pas un chèque émis).
+TRANSACTION_TYPES = [
+    ("COTISATION", Transaction.TYPE_BANK),
+    ("FRAIS", Transaction.TYPE_BANK),
+    ("INTERETS", Transaction.TYPE_BANK),
+    ("CARTE", Transaction.TYPE_CARD),
+    ("PRELEVEMENT", Transaction.TYPE_ORDER),
+    ("VIREMENT", Transaction.TYPE_TRANSFER),
+    ("RETRAIT", Transaction.TYPE_WITHDRAWAL),
+    ("REMISE", Transaction.TYPE_DEPOSIT),
+    ("CHEQUE", Transaction.TYPE_CHECK),
+]
+
+
+def parse_cragr_date(text):
+    # Les dates arrivent en toutes lettres ("Mercredi 17 juin 2026") : on retire
+    # le jour de la semaine avant de les parser.
+    if not text:
+        return NotAvailable
+    parts = text.split(" ", 1)
+    if len(parts) > 1:
+        text = parts[1]
+    return parse_french_date(text).date()
+
+
+class CragrJsonPage(JsonPage):
+    def build_doc(self, text):
+        # Certaines familles de comptes (CREDITS, PLACEMENTS…) renvoient un corps
+        # vide avec un code 200 : on le traite comme un document vide.
+        if not text or not text.strip():
+            return {}
+        return super().build_doc(text)
+
+
+class AppConfigPage(CragrJsonPage):
     def get_client_id(self):
         return Dict("clientId")(self.doc)
 
-
-class SofincoRedirectionPage(LoanRedirectionPage):
-    pass
-
-
-class SofincoUidPage(LoggedPage, JsonPage):
-    def get_uid_session_contract(self):
-        contract = self.response.json().get("contratRenouvelableActifDtoList")
-        if not contract:
-            return None
-        return Dict("uid_session_contrat")(contract[0])
+    def get_structure_id(self, region):
+        for bank in Dict("regionalBanks", default=[])(self.doc):
+            if bank.get("identifier") == region:
+                return bank.get("structureId")
+        return None
 
 
-class SofincoTokenPage(LoggedPage, JsonPage):
-    def get_bearer_token(self):
-        return Dict("access_token")(self.doc)
+class SecurityUserPage(CragrJsonPage):
+    def get_state(self):
+        return Dict("state", default=None)(self.doc)
+
+    def get_csid(self):
+        return Dict("csid", default=None)(self.doc)
 
 
-class SofincoRevolvingCreditPage(LoggedPage, JsonPage):
+class KeypadPage(CragrJsonPage):
+    def build_password(self, password):
+        # Le code n'est pas transmis en clair : on envoie la position de chaque
+        # chiffre dans le clavier renvoyé par le serveur.
+        layout = Dict("keys_layout")(self.doc)
+        return f"[{','.join(str(layout.index(digit)) for digit in password)}]"
+
+
+class LoginValidationPage(CragrJsonPage):
+    def is_authenticated(self):
+        return Dict("step", default=None)(self.doc) == "AUTHENTICATED"
+
+    def get_redirect_url(self):
+        return Dict("redirect_url", default=None)(self.doc)
+
+
+class SsoPage(CragrJsonPage):
+    def get_context_id(self):
+        return Dict("context_id")(self.doc)
+
+
+class AccountsPage(CragrJsonPage):
     @method
-    class fill_sofinco_revolving(ItemElement):
-        obj_balance = CleanDecimal.SI(Dict("balanceAmount"), sign="-")
-        obj_currency = "EUR"
-        obj_total_amount = CleanDecimal.SI(Dict("attributedCapitalAmount", default=""), default=NotAvailable)
-        obj_available_amount = CleanDecimal.SI(Dict("availableCapitalAmount", default=""), default=NotAvailable)
-        obj_next_payment_amount = CleanDecimal.SI(Dict("monthlyPaymentAmount", default=""), default=NotAvailable)
-        obj_next_payment_date = Date(Dict("nextDueDate", default=""), default=NotAvailable)
-        obj_last_payment_date = Date(Dict("previousDueDate", default=""), default=NotAvailable)
-        obj_maturity_date = Date(Dict("creditEndDate", default=""), default=NotAvailable)
-        obj_nb_payments_left = Dict("numberOfRemainingDue", default=NotAvailable)
-        obj_used_amount = CleanDecimal.SI(Dict("usedCapitalAmount", default=""), default=NotAvailable)
+    class iter_accounts(DictElement):
+        # Le BFF renvoie parfois un même compte deux fois dans une grande famille
+        # (numero_compte dupliqué) : on ignore le doublon au lieu de lever DataError.
+        ignore_duplicate = True
 
-        def obj_rate(self):
-            percentage_rate = CleanDecimal.SI(Dict("annualPercentageRateOfCharge", default=""), default=None)(self)
-            if percentage_rate:
-                return percentage_rate / 100
-            return NotAvailable
+        def find_elements(self):
+            return self.page.doc.get(Env("family")(self)) or []
+
+        class item(ItemElement):
+            klass = Account
+
+            obj_id = Coalesce(
+                CleanText(Dict("numero_compte", default=None), default=""),
+                CleanText(Dict("id_element_contrat", default=None), default=""),
+                default="",
+            )
+            obj_number = CleanText(Dict("numero_compte", default=None), default=NotAvailable)
+            obj_label = Coalesce(
+                CleanText(Dict("libelle_produit_commercial", default=None), default=""),
+                CleanText(Dict("libelle", default=None), default=""),
+                default=NotAvailable,
+            )
+            obj_currency = CleanText(Dict("code_devise", default=None), default="EUR")
+            obj__id_element_contrat = Dict("id_element_contrat", default=None)
+
+            def obj_balance(self):
+                # Les crédits ne portent pas de solde mais un capital restant dû, renvoyé
+                # en valeur négative (une dette). Restreint à la famille CREDITS pour ne pas
+                # inverser par erreur le solde d'un compte d'une autre famille.
+                if Env("family")(self) == "CREDITS":
+                    capital = CleanDecimal.US(Dict("montant_capital_restant_du", default=None), default=None)(self)
+                    if capital is not None:
+                        return -abs(capital)
+                return CleanDecimal.US(
+                    Coalesce(Dict("solde_valeur", default=None), Dict("solde", default=None), default=NotAvailable),
+                    default=NotAvailable,
+                )(self)
+
+            def obj_type(self):
+                label = CleanText(Dict("libelle_produit_commercial", default=""))(self)
+                for key, account_type in LABEL_TYPES.items():
+                    if key.lower() in label.lower():
+                        return account_type
+                return FAMILY_TYPES.get(Env("family")(self), Account.TYPE_UNKNOWN)
 
 
-class DetailsLoanPage(LoggedPage, JsonPage):
+class TransactionItem(ItemElement):
+    klass = Transaction
+
+    obj_id = CleanText(Dict("id"))
+    obj_amount = CleanDecimal.US(Dict("montant"))
+    obj_raw = CleanText(
+        Format(
+            "%s %s %s",
+            CleanText(Dict("libelleTypeOperation", default=None), default=""),
+            CleanText(Dict("libelleOperation", default=None), default=""),
+            CleanText(Dict("libelleComplementaire", default=None), default=""),
+        )
+    )
+    # Le complément (réf détaillée) alimente le champ MEMO de l'export OFX via category :
+    # l'exporteur (woob/applications/bank/bank.py) lit obj.category pour le MEMO. On passe
+    # par category (champ déclaré, lu par toutes les versions de woob) plutôt que _memo,
+    # qui n'est honoré que par les woob récents. Le type est déjà porté par TRNTYPE
+    # (obj_type). Coalesce ramène un complément vide à NotAvailable (pas de MEMO vide).
+    obj_category = Coalesce(
+        CleanText(Dict("libelleComplementaire", default=None), default=""),
+        default=NotAvailable,
+    )
+
+    def obj_label(self):
+        # Le label ne porte que le libellé de l'opération (bénéficiaire/commerçant) : c'est
+        # lui qui alimente le champ NAME des exports OFX, indexé par les logiciels de compta.
+        # Le type d'opération reste dans obj_raw et obj_type, pas dans le label.
+        label = Coalesce(
+            CleanText(Dict("libelleOperation", default=None), default=""),
+            CleanText(Dict("libelleTypeOperation", default=None), default=""),
+            default="",
+        )(self)
+        # La nouvelle API renvoie la date de l'opération (jj/mm, parfois jj/mm/aaaa) collée
+        # en fin de libellé, ce que l'ancien site ne faisait pas. On la retire pour ne pas
+        # créer de faux doublons côté apps qui dédupliquent sur le libellé ; la date reste
+        # portée par obj_date.
+        label = re.sub(r"\s+\d{2}/\d{2}(?:/\d{2,4})?$", "", label)
+        return label or NotAvailable
+
+    def obj_type(self):
+        label = CleanText(Dict("libelleTypeOperation", default=""))(self).upper()
+        for keyword, tr_type in TRANSACTION_TYPES:
+            if keyword in label:
+                return tr_type
+        return Transaction.TYPE_UNKNOWN
+
+    def obj_date(self):
+        return parse_cragr_date(Dict("dateOperationAffichee", default=None)(self))
+
+    def obj_rdate(self):
+        return parse_cragr_date(Dict("dateValeurAffichee", default=None)(self))
+
+
+class HistoryPage(CragrJsonPage):
+    def has_next(self):
+        return bool(Dict("hasNext", default=False)(self.doc))
+
     @method
-    class fill_loan(ItemElement):
-        obj_total_amount = CleanDecimal.SI(Dict("resume/montant_emprunte/montant"))
-        obj_rate = CleanDecimal.French(Dict("remboursement/taux_emprunt"))
-        obj_next_payment_amount = CleanDecimal.SI(
-            Dict("resume/montant_echeance/montant", default=NotAvailable), default=NotAvailable
-        )
-        obj_next_payment_date = Date(
-            Dict("resume/date_prochaine_echeance", default=NotAvailable), dayfirst=True, default=NotAvailable
-        )
-        obj_maturity_date = Date(Dict("caracteristique_credit/date_fin"), dayfirst=True)
-        obj_subscription_date = Date(Dict("caracteristique_credit/date_debut"), dayfirst=True)
-        obj__insurance_rate = CleanDecimal.French(
-            Dict("remboursement/taux_assurance", default=NotAvailable), default=NotAvailable
-        )
+    class iter_history(DictElement):
+        def find_elements(self):
+            for bloc in self.page.doc.get("operationBlocs") or []:
+                yield from bloc.get("operationDetails", [])
 
-        def obj_duration(self):
-            duration = Dict("caracteristique_credit/duree_totale", default=NotAvailable)(self)
-            if empty(duration):
-                return NotAvailable
-            return int(duration)
-
-        def obj_deferred(self):
-            # No case found yet with these fields filled
-            if (
-                Dict("remboursement/montant_differe", default=None)(self)
-                or Dict("caracteristique_credit/periode_differe_debut", default=None)(self)
-                or Dict("caracteristique_credit/periode_differe_fin", default=None)(self)
-            ):
-                # To throw after being triggered once
-                # And check if the loan is necessarily deferred when at least one of these field is filled
-                self.logger.warning("deferred fields are filled for: %s | id: %s", self.obj.label, self.obj.id)
-            return NotAvailable
-
-        # No case found yet, if an error is raised in the future, it will be easy to fix
-        def obj_start_repayment_date(self):
-            start_repayment_date = Date(
-                Dict("caracteristique_credit/periode_debut_differe", default=None), default=NotAvailable
-            )(self)
-            # To throw after being triggered once
-            # And verify if the key: periode_debut_differe provides the start_repayment_date
-            if start_repayment_date:
-                self.logger.warning(
-                    "start_repayment_date may be available for: %s | id: %s", self.obj.label, self.obj.id
-                )
-            return NotAvailable
+        item = TransactionItem
 
 
-class RevolvingPage(LoggedPage, HTMLPage):
+class ComingPage(CragrJsonPage):
     @method
-    class fill_revolving(ItemElement):
-        obj_total_amount = CleanDecimal.French(
-            '//span[text()="Capital attribué"]/ancestor::tr[1]/td[4]/span/text()', default=NotAvailable
-        )
-        obj_used_amount = CleanDecimal.French(
-            '//span[text()="Capital utilisé"]/ancestor::tr[1]/td[4]/span/text()', default=NotAvailable
-        )
-        obj_available_amount = CleanDecimal.French(
-            '//span[text()="Capital disponible"]/ancestor::tr[1]/td[4]/span/text()', default=NotAvailable
-        )
-        obj_next_payment_amount = CleanDecimal.French(
-            '//span[text()="Montant du prochain prélèvement"]/ancestor::tr[1]/td[4]/span/text()', default=NotAvailable
-        )
-        obj_next_payment_date = Date(
-            CleanText('//span[text()="Date du prochain prélèvement"]/ancestor::tr[1]/td[4]/span/text()'),
-            dayfirst=True,
-            default=NotAvailable,
-        )
-        obj_rate = CleanDecimal.French(
-            '//span[text()="TAEG révisable :"]/ancestor::tr[1]/td[4]/span/text()', default=NotAvailable
-        )
+    class iter_coming(DictElement):
+        def find_elements(self):
+            for section in ("carteDebitImmediat", "autreOperation"):
+                section_data = self.page.doc.get(section) or {}
+                for bloc in section_data.get("operationBlocs") or []:
+                    yield from bloc.get("operationDetails", [])
 
-        def obj_balance(self):
-            balance = Field("used_amount")(self)
-            if empty(balance):
-                return NotAvailable
-            return -abs(balance)
-
-    def back_to_home(self):
-        self.get_form(name="formulaire").submit()
-
-    def get_redirection_details(self):
-        cookies = {}
-        url = JSVar(Attr("//body", "onload"), "document.location")(self.doc)
-        onload = JSVar(Attr("//body", "onload"), "document.cookie", nth="*")(self.doc)
-
-        for cookie in onload:
-            match = re.search(r"(cookie_\w+)=(\w+)", cookie)
-            cookies.update({match.group(1): match.group(2)})
-
-        return url, cookies
-
-
-class RevolingErrorPage(LoggedPage, HTMLPage):
-    pass
-
-
-class ConsumerCreditPage(LoggedPage, HTMLPage):
-    @method
-    class fill_consumer_credit(ItemElement):
-        obj_total_amount = CleanDecimal.French(
-            Attr('//span[@id="span_mtpa74"]/input', "value", default=NotAvailable), default=NotAvailable
-        )
-        obj_used_amount = CleanDecimal.French(
-            Attr('//span[@id="span_mkut14"]/input', "value", default=NotAvailable), default=NotAvailable
-        )
-        obj_available_amount = CleanDecimal.French(
-            Attr('//span[@id="span_mtdis8"]/input', "value", default=NotAvailable), default=NotAvailable
-        )
-        obj_next_payment_amount = CleanDecimal.French(
-            Attr('//span[@id="span_mprepb"]/input', "value", default=NotAvailable), default=NotAvailable
-        )
-        obj_next_payment_date = Date(
-            Format(
-                "%s/%s/%s",
-                CleanText(Attr('//span[@id="span_dhppr"]/input[1]', "value", default="")),
-                CleanText(Attr('//span[@id="span_dhppr"]/input[2]', "value", default="")),
-                CleanText(Attr('//span[@id="span_dhppr"]/input[3]', "value", default="")),
-            ),
-            dayfirst=True,
-            default=NotAvailable,
-        )
-
-        def obj_balance(self):
-            balance = Field("used_amount")(self)
-            if empty(balance):
-                return NotAvailable
-            return -abs(balance)
-
-    def get_consumer_credit_redirection_url(self):
-        return JSVar(Attr("//body", "onload"), "document.location")(self.doc)
-
-    def get_consumer_credit_details_url(self):
-        data = {}
-
-        for elem in self.doc.xpath("//input"):
-            data[elem.name] = elem.value
-        data["gcFmkActionCode"] = re.search(r"try{(.+)SetTimeout", self.text).group(1)
-
-        url = JSVar(CleanText("//script"), var="jsConstFmkPresentation")(self.doc)
-
-        return url, data
-
-    def back_to_home(self):
-        self.get_form(name="formulaire").submit()
-
-
-class EntRedirectionPage(LoanRedirectionPage):
-    def get_first_ca_connect_url(self):
-        return Regexp(CleanText("//script"), r"window\.location\.replace\(\"(\w.+)\"\)")(self.doc)
-
-    def get_second_ca_connect_url(self):
-        return Regexp(CleanText("//script"), r"window\.location\.href = \'(\w.+)\'")(self.doc)
-
-
-class JsonRedirectionPage(LoggedPage, JsonPage):
-    def get_from_json(self, json_key):
-        return Dict(json_key)(self.doc)
+        item = TransactionItem
