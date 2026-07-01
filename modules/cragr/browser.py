@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from woob.browser import URL, LoginBrowser, need_login
+from woob.capabilities.bank import Account
 from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
 
 from .pages import (
@@ -249,6 +250,9 @@ class CreditAgricoleBrowser(LoginBrowser):
 
     @need_login
     def iter_history(self, account):
+        if account.type != Account.TYPE_CHECKING and account.type != Account.TYPE_SAVINGS:
+            return
+
         self._open_detail_dav(account)
         seen = set()
         for _ in range(self.MAX_HISTORY_CALLS):
@@ -266,6 +270,9 @@ class CreditAgricoleBrowser(LoginBrowser):
 
     @need_login
     def iter_coming(self, account):
+        if account.type != Account.TYPE_CHECKING:
+            return []
+
         self._open_detail_dav(account)
         self.dav_coming.go(region=self.region)
         return self.page.iter_coming()
