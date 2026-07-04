@@ -345,7 +345,7 @@ class PasswordPage(LoginPage, AuthenticationFormPage):
         )(self.doc)
 
     def is_html_loaded(self):
-        return HasElement("//title")(self.doc)
+        return HasElement("//form")(self.doc)
 
     def get_document_cookie(self):
         # Cookie looks like "__brs_mit=842368080c4d0d4b4ed804491e8f7120"
