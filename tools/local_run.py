@@ -90,6 +90,7 @@ run_quiet(
 run_quiet(
     [
         venv_exe,
+        "-s",
         "-m",
         "pip",
         "install",
