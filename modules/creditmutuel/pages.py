@@ -2529,7 +2529,46 @@ class IbanPage(LoggedPage, HTMLPage):
                 return iban_document
 
 
-class PorInvestmentsPage(LoggedPage, HTMLPage):
+class PorHistoryPage(LoggedPage, HTMLPage):
+    def submit_date_range_form(self):
+        form = self.get_form(id="frmMere")
+        form["txtDateSaisie"] = (datetime.today() - relativedelta(years=1)).strftime("%d/%m/%Y")
+        form.submit()
+
+    def has_next_page(self):
+        return bool(self.doc.xpath('//input[@id="NEXT"]'))
+
+    def submit_next_page_form(self):
+        form = self.get_form(id="frmMere")
+        form["NEXT.x"] = 0
+        form["NEXT.y"] = 0
+        form.submit()
+
+    def has_no_transaction(self):
+        return bool(self.doc.xpath('//td[@id="bwebTdPasOperation"]'))
+
+    @method
+    class iter_history(TableElement):
+        item_xpath = '//table[@class="liste bourse"]/tbody/tr[td]'
+        head_xpath = '//table[@class="liste bourse"]/thead//th'
+
+        col_date = "Exécution"
+        col_label = "Opération"
+        col_investment_label = "Valeur"
+        col_investment_quantity = re.compile(r"Quantité")
+        col_amount = "Montant net"
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_date = Date(CleanText(TableCell("date")), dayfirst=True)
+            obj_label = CleanText(TableCell("label"))
+            obj_amount = CleanDecimal.French(TableCell("amount"), default=NotAvailable)
+            obj_type = Transaction.TYPE_BANK
+            obj__details_link = Base(TableCell("label"), Link(".//a", default=NotAvailable))
+
+
+class PorInvestmentsPage(PorHistoryPage):
     @method
     class iter_investment(TableElement):
         item_xpath = '//table[@id="tabValorisation"]/tbody/tr[td and @id]'
@@ -2589,45 +2628,6 @@ class PorInvestmentsPage(LoggedPage, HTMLPage):
                 if diff_ratio_percent:
                     return diff_ratio_percent / 100
                 return NotAvailable
-
-
-class PorHistoryPage(LoggedPage, HTMLPage):
-    def submit_date_range_form(self):
-        form = self.get_form(id="frmMere")
-        form["txtDateSaisie"] = (datetime.today() - relativedelta(years=1)).strftime("%d/%m/%Y")
-        form.submit()
-
-    def has_next_page(self):
-        return bool(self.doc.xpath('//input[@id="NEXT"]'))
-
-    def submit_next_page_form(self):
-        form = self.get_form(id="frmMere")
-        form["NEXT.x"] = 0
-        form["NEXT.y"] = 0
-        form.submit()
-
-    def has_no_transaction(self):
-        return bool(self.doc.xpath('//td[@id="bwebTdPasOperation"]'))
-
-    @method
-    class iter_history(TableElement):
-        item_xpath = '//table[@class="liste bourse"]/tbody/tr[td]'
-        head_xpath = '//table[@class="liste bourse"]/thead//th'
-
-        col_date = "Exécution"
-        col_label = "Opération"
-        col_investment_label = "Valeur"
-        col_investment_quantity = re.compile(r"Quantité")
-        col_amount = "Montant net"
-
-        class item(ItemElement):
-            klass = Transaction
-
-            obj_date = Date(CleanText(TableCell("date")), dayfirst=True)
-            obj_label = CleanText(TableCell("label"))
-            obj_amount = CleanDecimal.French(TableCell("amount"), default=NotAvailable)
-            obj_type = Transaction.TYPE_BANK
-            obj__details_link = Base(TableCell("label"), Link(".//a", default=NotAvailable))
 
 
 class PorHistoryDetailsPage(LoggedPage, HTMLPage):

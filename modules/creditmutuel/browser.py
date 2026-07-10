@@ -240,11 +240,6 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         r"/(?P<subbank>.*)fr/banque/PORT_Valo.aspx\?&ddp=(?P<ddp>.*)",
         PorInvestmentsPage,
     )
-    por_history = URL(
-        r"/(?P<subbank>.*)fr/banque/PORT_OperationsLst.aspx",
-        r"/(?P<subbank>.*)fr/banque/PORT_OperationsLst.aspx\?&ddp=(?P<ddp>.*)",
-        PorHistoryPage,
-    )
     por_history_details = URL(r"/(?P<subbank>.*)fr/banque/PORT_OperationsDet.aspx", PorHistoryDetailsPage)
     por_market_orders = URL(
         r"/(?P<subbank>.*)fr/banque/PORT_OrdresLst.aspx",
@@ -1098,7 +1093,7 @@ class CreditMutuelBrowser(TwoFactorBrowser):
         if account._is_inv:
             if account.type in (Account.TYPE_MARKET, Account.TYPE_PEA) and account._link_id:
                 self.go_por_accounts()
-                self.por_history.go(subbank=self.currentSubBank, ddp=account._link_id)
+                self.por_investments.go(subbank=self.currentSubBank, ddp=account._link_id)
                 self.page.submit_date_range_form()
                 if self.page.has_no_transaction():
                     return
