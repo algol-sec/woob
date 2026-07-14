@@ -107,7 +107,6 @@ from .pages import (
     OtpValidationPage,
     OutagePage,
     PorHistoryDetailsPage,
-    PorHistoryPage,
     PorInvestmentsPage,
     PorMarketOrderDetailsPage,
     PorMarketOrdersPage,
