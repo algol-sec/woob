@@ -51,7 +51,7 @@ with tempfile.NamedTemporaryFile(mode="w", dir=wd, delete=False) as f:
 os.rename(f.name, os.path.join(wd, "sources.list"))
 
 
-# Hide output unless there is an error
+# Hide output unless there is an error.
 def run_quiet(cmd):
     p = subprocess.Popen(
         cmd,
@@ -67,6 +67,9 @@ def run_quiet(cmd):
 
 
 venv_exe = os.path.join(venv, "bin", "python")
+
+# Create a virtual environment that has access to the global packages (i.e. python packages
+# installed globally).
 run_quiet(
     [
         sys.executable,
@@ -76,6 +79,8 @@ run_quiet(
         venv,
     ]
 )
+
+# Install and upgrade pip and setuptools in this virtualenv.
 run_quiet(
     [
         venv_exe,
@@ -87,6 +92,10 @@ run_quiet(
         "setuptools",
     ]
 )
+
+# Install woob in this virtualenv; exclude user-site packages (i.e. python packages installed for
+# the current user only, e.g. in ~/.local/python) during this process (`-s` toggle), so
+# only global and virtualenv packages are.
 run_quiet(
     [
         venv_exe,
@@ -98,6 +107,8 @@ run_quiet(
         project,
     ]
 )
+
+# Update the woob configuration.
 run_quiet([os.path.join(venv, "bin", "woob"), "config", "update", "-d"])
 
 if os.path.isfile(script):
@@ -105,4 +116,6 @@ if os.path.isfile(script):
 else:
     spath = os.path.join(venv, "bin", script)
 
+# Spawn `woob` with all the arguments, also exclude user-site packages from being loaded (`-s`
+# toggle), so only global and virtualenv packages are.
 os.execvpe(venv_exe, [venv_exe, "-s"] + pyargs + [spath] + args, env)
