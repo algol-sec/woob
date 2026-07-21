@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.bank import Account
-from woob.exceptions import BrowserIncorrectPassword, BrowserUnavailable
+from woob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 
 from .pages import (
     AccountsPage,
@@ -177,8 +177,14 @@ class CreditAgricoleBrowser(LoginBrowser):
             params=self.oauth_params,
             json={"identifiant": self.username, "liste_touches": keypad_password},
         )
+        if self.page.has_captcha():
+            raise ActionNeeded(
+                "Friendly captcha detected, please authenticate manually on the website once to disable it"
+            )
+
         if not self.page.is_authenticated():
             raise BrowserIncorrectPassword()
+
         redirect_url = self.page.get_redirect_url()
 
         self.location(redirect_url)

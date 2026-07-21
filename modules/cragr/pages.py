@@ -112,6 +112,9 @@ class KeypadPage(CragrJsonPage):
 
 
 class LoginValidationPage(CragrJsonPage):
+    def has_captcha(self):
+        return Dict("captcha", default=False)(self.doc)
+
     def is_authenticated(self):
         return Dict("step", default=None)(self.doc) == "AUTHENTICATED"
 
