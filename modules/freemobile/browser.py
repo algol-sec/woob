@@ -39,6 +39,7 @@ from .pages import (
     CredentialsPage,
     CsrfPage,
     ErrorPage,
+    InvoicesPage,
     LoginPage,
     LoginRSCPage,
     MainPage,
@@ -63,7 +64,8 @@ class Freemobile(TwoFactorBrowser):
     login_rsc_page = URL(r"/account/v2/login", LoginRSCPage)
     main_page = URL(r"/account/$", MainPage)
     logoutpage = URL(r"/account/\?logout=user", LoginPage)
-    pdfpage = URL(r"/account/conso-et-factures\?facture=pdf", PdfPage)
+    invoices_page = URL(r"/account/v2/api/SI/invoice$", InvoicesPage)
+    pdfpage = URL(r"/account/v2/api/SI/invoice/(?P<document_id>\d+)", PdfPage)
     profile = URL(r"/account/mes-informations", ProfilePage)
     offerpage = URL(r"/account/mon-offre", OfferPage)
     optionspage = URL(r"/account/mes-options", OptionsPage)
@@ -298,7 +300,10 @@ class Freemobile(TwoFactorBrowser):
 
     @need_login
     def iter_documents(self, subscription):
+        # Selecting the line is a side effect of this request; it redirects
+        # to the new /account/v2 area, which has no matching Page.
         self.main_page.go(params={"switch-user": subscription._real_id})
+        self.invoices_page.go()
         return self.page.iter_documents(sub=subscription.id, is_recapitulatif=subscription._is_recapitulatif)
 
     @need_login

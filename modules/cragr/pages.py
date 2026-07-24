@@ -42,6 +42,7 @@ LABEL_TYPES = {
     "LDD": Account.TYPE_SAVINGS,
     "PEL": Account.TYPE_SAVINGS,
     "CEL": Account.TYPE_SAVINGS,
+    "Parts Sociales": Account.TYPE_MARKET,
 }
 
 # Le BFF décrit le type d'opération en clair dans libelleTypeOperation ("PAIEMENT PAR

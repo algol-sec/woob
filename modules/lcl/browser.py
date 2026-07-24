@@ -373,8 +373,8 @@ class LCLBrowser(LoginBrowser, StatesMixin):
             return
 
         if account._market_link:
-            self.go_bourse_website()
-            self.connexion_bourse()
+            if not self.go_bourse_website() or not self.connexion_bourse():
+                return
             self.location(
                 account._link_id,
                 params={
@@ -449,8 +449,8 @@ class LCLBrowser(LoginBrowser, StatesMixin):
 
         # ACCOUNT IN BOURSE PAGE
         if account._market_link:
-            self.go_bourse_website()
-            self.connexion_bourse()
+            if not self.go_bourse_website() or not self.connexion_bourse():
+                return
             self.location(account._market_link)
             yield from self.page.iter_investment(account_currency=account.currency)
             self.deconnexion_bourse()
@@ -549,20 +549,24 @@ class LCLBrowser(LoginBrowser, StatesMixin):
 
     @need_login
     def go_bourse_website(self):
-        self.launch_redirection.go(
-            website=self.website,
-            data={
-                "token": self.token,
-                "rt": self.refresh_token,
-                "exp": self.encrypted_expire_date,
-                "ib": self.redirect_user_id,
-                "from": "/outil/UWMI/Bourse",
-                "monEspaceRouteBack": self.encode_64("/synthese/epargne"),
-                "redirectTo": "BOURSE",
-                "canal": "WEB",
-                "isFromNewApp": "true",
-            },
-        )
+        try:
+            self.launch_redirection.go(
+                website=self.website,
+                data={
+                    "token": self.token,
+                    "rt": self.refresh_token,
+                    "exp": self.encrypted_expire_date,
+                    "ib": self.redirect_user_id,
+                    "from": "/outil/UWMI/Bourse",
+                    "monEspaceRouteBack": self.encode_64("/synthese/epargne"),
+                    "redirectTo": "BOURSE",
+                    "canal": "WEB",
+                    "isFromNewApp": "true",
+                },
+            )
+        except ClientError:
+            self.logger.info("Bourse website unreachable, PEA/CPT may be unavailable.")
+            return False
         if self.bourse_home.is_here() or self.bourse_pre_load.is_here():
             return True
         return False

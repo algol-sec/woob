@@ -20,15 +20,13 @@
 import json
 import re
 
-from dateutil.relativedelta import relativedelta
-
-from woob.browser.elements import ItemElement, ListElement, SkipItem, method
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
 from woob.browser.filters.html import AbsoluteLink, Link
 from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import (
+    BrowserURL,
     CleanDecimal,
     CleanText,
-    Currency,
     Date,
     Env,
     Field,
@@ -41,7 +39,6 @@ from woob.capabilities.address import PostalAddress
 from woob.capabilities.base import NotAvailable
 from woob.capabilities.bill import Bill, Subscription
 from woob.capabilities.profile import Profile
-from woob.tools.date import parse_french_date
 
 
 class ErrorPage(HTMLPage):
@@ -81,9 +78,28 @@ class MainPage(LoggedPage, HTMLPage):
     def get_information_message(self):
         return CleanText('//div[has-class("flash")]')(self.doc)
 
+
+class InvoicesPage(LoggedPage, JsonPage):
+    """
+    JSON API of the new (v2) subscriber area.
+
+    ``invoices`` holds the bills of the currently selected line, and
+    ``summaries`` the multi-line recap documents ("récapitulatif").
+    Assumed, not verified: the reference account has a single line and an
+    empty ``summaries`` list. Both are expected to use the same item schema:
+    {"id": 2633535228, "name": "Juillet 2026", "state": "running",
+     "fileState": "done", "fileUrl": "/api/document/invoice/16911141/2633535228",
+     "amount": "15,99", "date": "2026-07-14T00:00:00+02:00"}
+    """
+
     @method
-    class iter_documents(ListElement):
-        item_xpath = '//div[@id="table-invoice"]//div[has-class("invoice")]'
+    class iter_documents(DictElement):
+        def find_elements(self):
+            if Env("is_recapitulatif")(self):
+                key = "summaries"
+            else:
+                key = "invoices"
+            yield from self.el.get(key, [])
 
         def store(self, obj):
             # This code enables doc_id when there
@@ -101,45 +117,24 @@ class MainPage(LoggedPage, HTMLPage):
         class item(ItemElement):
             klass = Bill
 
-            obj_url = AbsoluteLink('.//a[@data-title="Télécharger ma facture"]')
-            obj_total_price = CleanDecimal.SI('.//div[has-class("table-price")]')
-            obj_currency = Currency('.//div[has-class("table-price")]')
+            obj_url = BrowserURL("pdfpage", document_id=Dict("id"))
+            obj_total_price = CleanDecimal.French(Dict("amount"))
+            obj_currency = "EUR"
             obj_format = "pdf"
-            obj__raw_date = QueryValue(Field("url"), "date")
+            obj_date = Date(Dict("date"))
 
-            def obj__date_recap(self):
-                # Unfortunately the date of those 'recap' documents is lost (not
-                # present in url, etc...) and is only available in the PDFs
-                # themselves.
-                # Arbitrarily, we set it to the last day of month.
-                dt = Date(
-                    Format("1 %s", CleanText('.//div[has-class("date")]')),
-                    parse_func=parse_french_date,
-                    dayfirst=True,
-                )(self)
-                dt += relativedelta(months=1, days=-1)
-                return dt
+            def obj_has_file(self):
+                return Dict("fileState", default=None)(self) == "done"
 
             def obj_id(self):
-                if ("pdfrecap" in Field("url")(self)) != Env("is_recapitulatif")(self):
-                    raise SkipItem()
                 if Env("is_recapitulatif")(self):
-                    return Format("%s_%s", Env("sub"), FormatDate("%Y%m", Field("_date_recap")))(self)
-                return Format("%s_%s", Env("sub"), Field("_raw_date"))(self)
+                    return Format("%s_%s", Env("sub"), FormatDate("%Y%m", Field("date")))(self)
+                return Format("%s_%s", Env("sub"), FormatDate("%Y%m%d", Field("date")))(self)
 
             def obj_label(self):
                 if Env("is_recapitulatif")(self):
-                    return Format("Multiligne - %s", CleanText('.//div[has-class("date")]'))(self)
-                return Format(
-                    "%s - %s",
-                    CleanText('//div[@class="table-container"]/p[@class="table-sub-title"]'),
-                    CleanText('.//div[has-class("date")]'),
-                )(self)
-
-            def obj_date(self):
-                if Env("is_recapitulatif")(self):
-                    return Field("_date_recap")(self)
-                return Date(Field("_raw_date"))(self)
+                    return Format("Multiligne - %s", CleanText(Dict("name")))(self)
+                return CleanText(Dict("name"))(self)
 
 
 class ProfilePage(LoggedPage, HTMLPage):
