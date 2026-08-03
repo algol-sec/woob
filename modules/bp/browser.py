@@ -166,6 +166,8 @@ class BPSeleniumBrowser(SeleniumBrowser):
     )
     login_attente_af = URL(
         r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&phase=2b&cu=attenteAF.*",
+        # the AuthentInfoAF message page now redirects to phase=bb
+        r"/wsost/OstBrokerWeb/loginform\?TAM_OP=login&phase=bb&cu=attenteAF.*",
         AttenteAF,
     )
 

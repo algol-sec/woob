@@ -21,6 +21,8 @@ import re
 import time
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from woob.browser.filters.standard import CleanText, Lower, Regexp
 from woob.browser.pages import HTMLPage, JsonPage, LoggedPage, RawPage
@@ -91,7 +93,9 @@ class LoginPageSelenium(SeleniumPage):
 
 class MessageAuth(SeleniumPage):
     def on_load(self):
-        confirmer = self.driver.find_element(By.ID, "back-link")
+        # The message page is now rendered client-side (async JSON fetch),
+        # and on_load runs with implicit_wait(0): wait explicitly for the button.
+        confirmer = WebDriverWait(self.driver, 15).until(EC.element_to_be_clickable((By.ID, "back-link")))
         confirmer.click()
 
 
