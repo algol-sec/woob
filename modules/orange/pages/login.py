@@ -38,7 +38,7 @@ class PasswordPage(JsonPage):
             return "Votre mot de passe actuel n’est pas suffisamment sécurisé et doit être renforcé."
 
     def get_idme_error_message(self):
-        if self.doc.get("data").get("location") == "https://r.orange.fr/r/Oerreur_403?ref=euiidme":
+        if (self.doc.get("data") or {}).get("location") == "https://r.orange.fr/r/Oerreur_403?ref=euiidme":
             # Idme returned a 200 but containing a redirection to an error page
             return "Idme Authentication error."
 
