@@ -31,7 +31,7 @@ class CreditCooperatifModule(BanquePopulaireModule):
     EMAIL = "weboob@kevin.pouget.me"
     DESCRIPTION = "Crédit Coopératif"
     LICENSE = "LGPLv3+"
-    DEPENDENCIES = ("bandpopulaire",)
+    DEPENDENCIES = ("banquepopulaire",)
 
     CONFIG = BackendConfig(
         ValueBackendPassword("login", label="Identifiant", masked=False, regexp=r"[a-zA-Z0-9]+"),
