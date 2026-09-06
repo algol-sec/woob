@@ -86,7 +86,12 @@ class CragrJsonPage(JsonPage):
 
 class AppConfigPage(CragrJsonPage):
     def get_client_id(self):
-        return Dict("clientId")(self.doc)
+        # espace-client moved clientId under "mireOptions" while detail-dav keeps
+        # it at the root: accept both locations.
+        return Coalesce(
+            Dict("mireOptions/clientId", default=NotAvailable),
+            Dict("clientId", default=NotAvailable),
+        )(self.doc)
 
     def get_structure_id(self, region):
         for bank in Dict("regionalBanks", default=[])(self.doc):
