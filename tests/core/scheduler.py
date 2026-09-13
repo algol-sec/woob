@@ -35,7 +35,7 @@ def test_cancel_existing_event(caplog: pytest.LogCaptureFixture) -> None:
 
     sched = Scheduler()
     try:
-        sid = sched.schedule(0.01, func)
+        sid = sched.schedule(0.1, func)
 
         assert sid == 1
         func.assert_not_called()
@@ -46,7 +46,7 @@ def test_cancel_existing_event(caplog: pytest.LogCaptureFixture) -> None:
                 ("woob.core.scheduler.scheduler", 10, 'scheduled function "_schedule_callback" is canceled'),
             ]
 
-        time.sleep(0.011)
+        time.sleep(0.15)
         func.assert_not_called()
     finally:
         sched.want_stop()
@@ -68,13 +68,13 @@ def test_schedule() -> None:
 
     sched = Scheduler()
     try:
-        sid = sched.schedule(0.01, func)
+        sid = sched.schedule(0.1, func)
 
         assert sid == 1
         func.assert_not_called()
-        time.sleep(0.011)
+        time.sleep(0.15)
         func.assert_called_once()
-        time.sleep(0.011)
+        time.sleep(0.15)
         func.assert_called_once()
     finally:
         sched.want_stop()
@@ -87,15 +87,15 @@ def test_repeat(caplog: pytest.LogCaptureFixture) -> None:
 
     sched = Scheduler()
     try:
-        sid = sched.repeat(0.01, func)
+        sid = sched.repeat(0.1, func)
 
         assert sid == 1
 
         with caplog.at_level(logging.DEBUG, logger="woob.core.scheduler.scheduler"):
-            time.sleep(0.021)
+            time.sleep(0.25)
             assert func.call_count >= 2  # time sensitive test might be 2 or 3
             assert caplog.record_tuples == [
-                ("woob.core.scheduler.scheduler", logging.DEBUG, 'function "myfunc" will be called in 0.01 seconds'),
+                ("woob.core.scheduler.scheduler", logging.DEBUG, 'function "myfunc" will be called in 0.1 seconds'),
             ] * len(caplog.record_tuples)
     finally:
         sched.want_stop()
