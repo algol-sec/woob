@@ -479,10 +479,27 @@ class TransactionApiPage(LoggedPage, JsonPage):
             def condition(self):
                 return CleanDecimal.SI(Dict("amount/value"))(self) != 0
 
-            obj_date = Date(CleanText(Dict("bookingDate")), default=NotAvailable)
-            obj_vdate = Date(CleanText(Dict("valueDate")), default=NotAvailable)
             obj_rdate = Date(CleanText(Dict("transactionDate")), default=NotAvailable)
-            obj_raw = Transaction.Raw(Dict("label/originalLabel"))
+            obj_vdate = Date(CleanText(Dict("valueDate", default=None), default=None), default=NotAvailable)
+
+            def obj_date(self):
+                booking_date_filter = Dict("bookingDate", default=None)
+                booking_date = booking_date_filter(self)
+                # Coming transactions don't have a date, all they have is a rdate.
+                if booking_date is None:
+                    return Date(CleanText(Dict("transactionDate")), default=NotAvailable)(self)
+                return Date(CleanText(booking_date_filter, default=None), default=NotAvailable)(self)
+
+            def obj_raw(self):
+                # Coming transactions have a garbage label, but they have the merchant name as
+                # another possible, better suited label. Use the fact they don't have a booking
+                # date to detect them and use the merchant name as a label instead of the garbage
+                # label.
+                booking_date = Dict("bookingDate", default=None)(self)
+                if booking_date is None:
+                    return Transaction.Raw(Dict("merchant/name"))(self)
+                return Transaction.Raw(Dict("label/originalLabel", default=NotAvailable))(self)
+
             obj_label = CleanText(Dict("label/simplifiedLabel"))
             obj_amount = CleanDecimal.SI(Dict("amount/value"))
             obj__details_link = None
@@ -689,13 +706,6 @@ class AccountsList(ActionNeededPage):
             obj__ca = CleanText('./a[contains(@class, "numero_compte")]/@rel')
             obj_owner_type = AccountOwnerType.PRIVATE
             obj__tpp_id = NotAvailable
-
-            def obj__card_links(self):
-                card_links = []
-                card_link = AbsoluteLink('./ul/li/a[contains(text(), "Carte bancaire")]', default=None)(self)
-                if card_link:
-                    card_links.append(card_link)
-                return card_links
 
             obj_label = CleanText('./a[contains(@class, "numero_compte")]/@title')
             obj_type = MapIn(Field("_history_link"), ACCOUNT_TYPES, Account.TYPE_UNKNOWN)

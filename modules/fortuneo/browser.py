@@ -590,15 +590,21 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
 
     @need_login
     def iter_coming(self, account):
-        for cb_link in account._card_links:
-            for _ in range(3):
-                self.location(cb_link)
-                if not self.page.is_loading():
-                    break
-                self.logger.debug("Sleeping for a second before we retry opening CB link...")
-                time.sleep(1)
+        self.location(account._history_link)
 
-            yield from sorted_transactions(self.page.iter_coming())
+        if not self.account_history.is_here():
+            return []
+
+        account_api_id = self.page.get_account_api_id()
+        if account_api_id:
+            self.portal_sso.go(headers={"apikey": self.client_id})
+            self.api_transactions.go(
+                id=account_api_id,
+                params={"transactionType": "CARD", "metadata": "true"},
+                headers={"apikey": self.client_id},
+            )
+            return sorted_transactions(list(self.page.iter_history()))
+        return []
 
     def process_action_needed(self):
         # we have to go in an iframe to know if there are CGUs
