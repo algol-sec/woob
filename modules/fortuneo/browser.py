@@ -63,6 +63,8 @@ from .pages.accounts_list import (
     InformationsPage,
     InvestmentApiPage,
     InvestmentHistoryPage,
+    LifeInsuranceTransactionApiPage,
+    LifeInsuranceTransactionDetailApiPage,
     LoanPage,
     PeaHistoryPage,
     ProfilePage,
@@ -173,6 +175,14 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
     set_cookies_api = URL(r"/valorisation-assurance-vie/api/security/oauth/sso-module\?response_type=token")
     # Calling this URL sets a session cookie required by the account and transaction APIs.
     portal_sso = URL(r"/oauth/portal-sso")
+    api_life_insurance_transaction_detail = URL(
+        r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>[^/]+)/transaction/(?P<transaction_id>.+)",
+        LifeInsuranceTransactionDetailApiPage,
+    )
+    api_life_insurance_transactions = URL(
+        r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>[^/]+)/transaction",
+        LifeInsuranceTransactionApiPage,
+    )
     api_investments_life_insurance = URL(
         r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>.+)", InvestmentApiPage
     )
@@ -480,7 +490,7 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                             self.page.fill_tpp_account_id(obj=account)
 
                             if not account._tpp_id:
-                                self.logger.warning(
+                                self.logger.debug(
                                     "Could not find the tpp_id of account %s",
                                     account.id,
                                 )
@@ -545,9 +555,37 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             Account.TYPE_LOAN,
             Account.TYPE_MORTGAGE,
         ):
-            return []
+            return
 
         self.location(account._history_link)
+
+        if account.type == Account.TYPE_LIFE_INSURANCE:
+            account_api_id = self.page.get_account_api_id()
+            if not account_api_id:
+                self.logger.warning("Could not find the API id of account %s", account.id)
+                return
+
+            # Calling this URL sets a session cookie required by the life insurance APIs.
+            self.set_cookies_api.go(data="")
+            self.api_life_insurance_transactions.go(
+                id=account_api_id,
+                headers={"Accept": "application/json"},
+            )
+            for tr in self.page.iter_history():
+                if tr._details_link:
+                    try:
+                        self.api_life_insurance_transaction_detail.go(
+                            id=account_api_id,
+                            transaction_id=tr._details_link,
+                            headers={"Accept": "application/json"},
+                        )
+                        self.page.fill_transaction_details(tr)
+                    except Exception as e:
+                        # The detail endpoint is optional: keep the transaction
+                        # without its underlying investments.
+                        self.logger.debug("Could not fetch details of transaction %s: %s", tr.label, e)
+                yield tr
+            return
 
         if self.account_history.is_here():
             # Checking account: use REST API

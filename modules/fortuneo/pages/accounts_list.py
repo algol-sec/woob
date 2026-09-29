@@ -18,7 +18,7 @@
 # flake8 : compatible
 
 import re
-from datetime import date
+from datetime import date, datetime
 
 from dateutil.relativedelta import relativedelta
 
@@ -503,6 +503,149 @@ class TransactionApiPage(LoggedPage, JsonPage):
             obj_label = CleanText(Dict("label/simplifiedLabel"))
             obj_amount = CleanDecimal.SI(Dict("amount/value"))
             obj__details_link = None
+
+
+class LifeInsuranceTransactionApiPage(LoggedPage, JsonPage):
+    """JSON page listing the transactions of a life insurance account.
+
+    GET /valorisation-assurance-vie/api/life-insurance/accounts/{id}/transaction
+    """
+
+    @method
+    class iter_history(DictElement):
+        item_xpath = "transactionDetails"
+
+        class item(ItemElement):
+            klass = Transaction
+
+            obj_date = Date(
+                CleanText(Dict("transactionCreationDate", default=None), default=NotAvailable), default=NotAvailable
+            )
+            obj_rdate = Date(
+                CleanText(Dict("transactionDate", default=None), default=NotAvailable), default=NotAvailable
+            )
+            obj_raw = CleanText(Dict("transactionLabel", default=NotAvailable))
+            obj_label = CleanText(Dict("transactionLabel", default=NotAvailable))
+            obj_amount = CleanDecimal.SI(Dict("transactionNetAmount"))
+            obj_type = MapIn(
+                CleanText(Dict("transactionCode")),
+                {
+                    # Distribution: coupon / dividend
+                    "405": Transaction.TYPE_PROFIT,
+                    # Reallocation: transfer between funds
+                    "400": Transaction.TYPE_ARBITRAGE,
+                    # Payment / subscription
+                    "200": Transaction.TYPE_DEPOSIT,
+                    "100": Transaction.TYPE_DEPOSIT,
+                    # Partial surrender
+                    "360": Transaction.TYPE_WITHDRAWAL,
+                    # Yearly revaluation of the euro fund
+                    "582": Transaction.TYPE_PROFIT,
+                    # Social contributions on the revaluation
+                    "585": Transaction.TYPE_ORDER,
+                    # Management fees
+                    "671": Transaction.TYPE_BANK,
+                    "670": Transaction.TYPE_BANK,
+                },
+                Transaction.TYPE_BANK,
+            )
+
+            def obj__details_link(self):
+                if Dict("availableDetailOperation", default=None)(self):
+                    return CleanText(Dict("transactionId"))(self)
+                return None
+
+
+class LifeInsuranceTransactionDetailApiPage(LoggedPage, JsonPage):
+    """JSON page with the details of a single life insurance transaction.
+
+    GET /valorisation-assurance-vie/api/life-insurance/accounts/{id}/transaction/{transaction_id}
+    """
+
+    def _build_investment(self, fund, is_sale=False):
+        inv = Investment()
+        inv.label = CleanText(Dict("label"))(fund)
+        isin = CleanText(Dict("isinCode"))(fund)
+        inv.code = isin
+        inv.code_type = "ISIN"
+        inv.unitvalue = CleanDecimal.SI(Dict("netAssetValue"), default=NotAvailable)(fund)
+        inv.valuation = CleanDecimal.SI(Dict("amount"), default=NotAvailable)(fund)
+        inv.vdate = Date(CleanText(Dict("valuationLastDate")), default=NotAvailable)(fund)
+
+        entry_shares = CleanDecimal.SI(Dict("entryShareNumber"), default=NotAvailable)(fund)
+        if is_sale:
+            # Sale: no new shares, the quantity is derived from the valuation and the unit value
+            if inv.unitvalue and not empty(inv.unitvalue) and inv.unitvalue != 0:
+                inv.quantity = -(inv.valuation / inv.unitvalue)
+            else:
+                inv.quantity = NotAvailable
+            if inv.valuation and not empty(inv.valuation):
+                inv.valuation = -abs(inv.valuation)
+        else:
+            # Purchase / distribution: use entryShareNumber when available
+            if entry_shares and not empty(entry_shares) and entry_shares != 0:
+                inv.quantity = entry_shares
+            else:
+                inv.quantity = NotAvailable
+        return inv
+
+    def fill_transaction_details(self, transaction):
+        investments = []
+
+        # Distributions: fundsList holds the distributed funds
+        distribution = self.doc.get("distribution")
+        if distribution:
+            for fund in distribution.get("fundsList", []):
+                investments.append(self._build_investment(fund))
+
+        # Payments / subscriptions: operationSupportList holds the supports
+        payment = self.doc.get("payment")
+        if payment:
+            for fund in payment.get("operationSupportList", []):
+                investments.append(self._build_investment(fund))
+
+        # Partial surrenders: fundsList holds the surrendered funds
+        repayment = self.doc.get("repayment")
+        if repayment:
+            for fund in repayment.get("fundsList", []):
+                investments.append(self._build_investment(fund))
+
+        # Reallocations: ingoingFundsList → purchases, outgoingFundsList → sales
+        reallocation = self.doc.get("reallocation")
+        if reallocation:
+            for fund in reallocation.get("ingoingFundsList", []):
+                investments.append(self._build_investment(fund, is_sale=False))
+            for fund in reallocation.get("outgoingFundsList", []):
+                investments.append(self._build_investment(fund, is_sale=True))
+
+        # Revaluation of the euro fund
+        yearly = self.doc.get("yearlyRevolarisation")
+        if yearly and "concernedFund" in yearly:
+            fund = dict(yearly["concernedFund"])
+            inv = self._build_investment(fund)
+            # The amount is returned either inside the revaluation object or at the root of the response.
+            amount = yearly.get("contractProfitSharingAmount")
+            if amount is None:
+                amount = self.doc.get("contractProfitSharingAmount")
+            inv.valuation = CleanDecimal.SI(amount, default=NotAvailable).filter(amount)
+            investments.append(inv)
+
+        transaction.investments = investments
+
+        # Fill the legacy Transaction attributes from the main investment.
+        # They are private on Transaction (only used internally), hence the prefix.
+        if investments:
+            transaction._code = investments[0].code
+            transaction._quantity = investments[0].quantity
+            transaction._unitvalue = investments[0].unitvalue
+
+        # Update the effective date when the detail provides one
+        rdate_str = self.doc.get("transactionDate")
+        if rdate_str:
+            try:
+                transaction.rdate = datetime.fromisoformat(rdate_str).date()
+            except (ValueError, TypeError):
+                pass
 
 
 class InvestmentHistoryPage(ActionNeededPage):
