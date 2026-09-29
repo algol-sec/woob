@@ -314,7 +314,7 @@ class PeaHistoryPage(ActionNeededPage):
         def obj__market_orders_link(self):
             link = AbsoluteLink('//a[contains(@href, "carnet-d-ordres.jsp")]', default=None)(self)
             if not link:
-                self.logger.warning("Market orders link not available for account %s", self.obj.label)
+                self.logger.debug("Market orders link not available for account %s", self.obj.label)
             return link
 
     def get_date_range_form(self):

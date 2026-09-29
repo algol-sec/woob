@@ -490,7 +490,7 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                             self.page.fill_tpp_account_id(obj=account)
 
                             if not account._tpp_id:
-                                self.logger.debug(
+                                self.logger.warning(
                                     "Could not find the tpp_id of account %s",
                                     account.id,
                                 )
