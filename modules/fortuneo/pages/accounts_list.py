@@ -507,7 +507,21 @@ class TransactionApiPage(LoggedPage, JsonPage):
 
 class InvestmentHistoryPage(ActionNeededPage):
     def get_account_api_id(self):
-        return Regexp(Attr('//iframe[@id="valuationIframe"]', "src"), r"accountId=(.+)")(self.doc)
+        # The accountId can be found in two places depending on the page:
+        # - history page: in the URL of the historiqueIframe
+        # - portfolio page: in a JS script containing accountId: "..."
+        return Coalesce(
+            Regexp(
+                CleanText('//iframe[@id="historiqueIframe"]/@src'),
+                r"accountId=([^&\"]+)",
+                default=None,
+            ),
+            Regexp(
+                CleanText('//script[contains(., "accountId:")]'),
+                r'accountId:\s*"([^"]+)"',
+                default=None,
+            ),
+        )(self.doc)
 
     def select_period(self):
         assert isinstance(self.browser.page, type(self))
