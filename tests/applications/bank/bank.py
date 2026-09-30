@@ -23,9 +23,10 @@ from decimal import Decimal
 
 from schwifty import IBAN
 
-from woob.applications.bank.bank import OfxFormatter
+from woob.applications.bank.bank import Appbank, OfxFormatter
 from woob.capabilities.bank import Account, Recipient, Transaction
 from woob.capabilities.base import NotAvailable
+from woob.exceptions import DecoupledValidation
 
 
 def test_ofx_empty_document_flush():
@@ -292,3 +293,21 @@ def test_ofx_tr_posted_transfer_format():
     assert f"<BRANCHID>{tr._recipient.iban.branch_code}</BRANCHID>" in output[1]
     assert f"<ACCTID>{tr._recipient.iban.account_code}</ACCTID>" in output[1]
     assert "<ACCTKEY>" in output[1]
+
+
+class FakeBackend:
+    name = "fake"
+
+
+def test_decoupled_validation_for_authentication():
+    # A decoupled validation asked to authenticate the session has no resource:
+    # the message of the bank must be displayed, not an error about the resource type.
+    app = Appbank.__new__(Appbank)
+    app.stderr = io.StringIO()
+
+    error = DecoupledValidation("Start your mobile application to confirm")
+    assert app.bcall_error_handler(FakeBackend(), error, "") is False
+
+    output = app.stderr.getvalue()
+    assert "Start your mobile application to confirm" in output
+    assert "resource" not in output

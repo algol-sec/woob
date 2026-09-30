@@ -704,6 +704,11 @@ class Appbank(CaptchaMixin, ReplApplication):
                 func_name = "add_recipient"
             elif isinstance(error.resource, Transfer):
                 func_name = "transfer"
+            elif error.resource is None:
+                # The validation is requested to authenticate the session, not
+                # to confirm a recipient or a transfer: there is nothing to resume.
+                print(f"Error({backend.name}): {error.message}", file=self.stderr)
+                return False
             else:
                 print(
                     'Error(%s): The resource should be of type Recipient or Transfer, not "%s"'
