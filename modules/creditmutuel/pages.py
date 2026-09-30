@@ -1579,7 +1579,11 @@ class OperationsPage(LoggedPage, HTMLPage):
             return a.attrib["href"]
 
     def has_more_operations(self):
-        return bool(self.doc.xpath('//a/span[contains(text(), "Plus d\'opérations")]'))
+        # The button is an <a> with several CSS classes and its label nested in
+        # a few <span>: match the class among others, or the label at any depth.
+        return bool(
+            self.doc.xpath('//a[has-class("ei_loadmorebtn")] | //a[.//span[contains(text(), "Plus d\'opérations")]]')
+        )
 
     def get_balance(self):
         return CleanDecimal.French('//span[contains(text(), "Dont opérations enregistrées")]', default=NotAvailable)(

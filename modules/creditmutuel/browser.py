@@ -1016,11 +1016,14 @@ class CreditMutuelBrowser(TwoFactorBrowser):
                 # 6 months history is not available
                 pass
 
-        while self.page:
+        # Arbitrary bound, so that a button which never goes away cannot loop forever
+        for _ in range(100):
+            if not self.page:
+                break
             try:
                 # Submit form if their is more transactions to fetch
                 form = self.page.get_form(id="I1:fm")
-                if self.page.doc.xpath('boolean(//a[@class="ei_loadmorebtn"])'):
+                if self.page.doc.xpath('boolean(//a[has-class("ei_loadmorebtn")])'):
                     form["_FID_DoLoadMoreTransactions"] = ""
                     form.submit()
                 else:
