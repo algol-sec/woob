@@ -559,7 +559,11 @@ class LoanPage(LoggedPage, HTMLPage):
                 CleanText('//h3[has-class("c-product-title__sublabel")]', default=NotAvailable),
                 default=NotAvailable,
             )(self)
-            assert not empty(account_id), "Could not fetch account ID, xpath was not found."
+            if empty(account_id):
+                # Accounts without an id are skipped by BoursoramaBrowser.get_filled_accounts().
+                # Do not raise here: it would make every other account unreachable as well.
+                self.logger.warning("Could not fetch account ID, xpath was not found: account skipped.")
+                return NotAvailable
             return account_id
 
         obj_type = Account.TYPE_LOAN
@@ -738,7 +742,11 @@ class HistoryPage(LoggedPage, HasConfigurationPage):
                 CleanText('//h3[@class="c-product-title__sublabel"]', default=NotAvailable),
                 default=NotAvailable,
             )(self)
-            assert not empty(account_id), "Could not fetch account ID, xpath was not found."
+            if empty(account_id):
+                # Accounts without an id are skipped by BoursoramaBrowser.get_filled_accounts().
+                # Do not raise here: it would make every other account unreachable as well.
+                self.logger.warning("Could not fetch account ID, xpath was not found: account skipped.")
+                return NotAvailable
             return account_id
 
         obj_number = obj_id
@@ -1098,7 +1106,11 @@ class MarketPage(LoggedPage, HTMLPage):
                 CleanText('//h3[has-class("c-product-title__sublabel")]', default=NotAvailable),
                 default=NotAvailable,
             )(self)
-            assert not empty(account_id), "Could not fetch account ID, xpath was not found."
+            if empty(account_id):
+                # Accounts without an id are skipped by BoursoramaBrowser.get_filled_accounts().
+                # Do not raise here: it would make every other account unreachable as well.
+                self.logger.warning("Could not fetch account ID, xpath was not found: account skipped.")
+                return NotAvailable
             return account_id
 
         obj_number = obj_id
