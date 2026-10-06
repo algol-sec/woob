@@ -21,6 +21,7 @@ import base64
 import json
 import os
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import wraps
 from hashlib import sha256
 from uuid import uuid4
@@ -963,7 +964,8 @@ class BanquePopulaire(TwoFactorBrowser):
 
                         balance = identity["balance"]
                         if balance is not None and "value" in balance and "currencyCode" in balance:
-                            account.balance = balance["value"]
+                            # The bank sends the amounts as JSON floats.
+                            account.balance = Decimal(str(balance["value"]))
                             account.currency = balance["currencyCode"]
                         else:
                             self.logger.debug(
