@@ -178,6 +178,8 @@ class BanquePopulaire(TwoFactorBrowser):
 
     transactions = URL(r"/pfm/user/v1.1/transactions", TransactionPage, base="URL_RS_AUTH")
 
+    upcoming_transactions = URL(r"/pfm/user/v1.1/upcoming", TransactionPage, base="URL_RS_AUTH")
+
     error_page = URL(
         r"https://[^/]+/cyber/internet/ContinueTask.do",
         r"https://[^/]+/_layouts/error.aspx",
@@ -205,6 +207,9 @@ class BanquePopulaire(TwoFactorBrowser):
     redirect_uri = URL(r"https://www.ibps.bpgo.banquepopulaire.fr/callbackleg")
 
     HAS_CREDENTIALS_ONLY = True
+
+    # Number of transactions the website asks for in one page of a PFM list.
+    PFM_PAGE_SIZE = 25
 
     @property
     def cdetab(self):
@@ -1001,92 +1006,178 @@ class BanquePopulaire(TwoFactorBrowser):
     def get_account(self, id):
         return find_object(self.iter_accounts(get_iban=False), id=id)
 
-    @retry(LoggedOut)
-    @need_login
-    def iter_history(self, account: BanquePopulaireAccount, coming=False):
-        self.updateBearerForDataConsumptionIfNeeded()
-
-        headers = {
+    @property
+    def data_api_headers(self):
+        return {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
             "Authorization": "Bearer %s" % self.access_token,
-            "Origin": "https://www.banquepopulaire.fr",
-            "Referer": "https://www.banquepopulaire.fr/",
+            "Origin": self.BASEURL,
+            "Referer": f"{self.BASEURL}/",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
         }
 
+    def _load_categories(self):
+        """Fetch the PFM category tree, used to name the category of a transaction."""
         params = {"businessType": "UserProfile", "subcategoryStructure": "Tree", "culture": "fr-FR"}
 
-        self.category_page.go(headers=headers, params=params)
+        self.category_page.go(headers=self.data_api_headers, params=params)
 
         categories = CategoryLoader()
         categories.load(self.page.doc)
+        return categories
 
-        pagination_start = 0
-        pagination_count = 25
-        current_skip_value = pagination_start
+    def _iter_pfm_items(self, url, params):
+        """Yield every entry of a paginated PFM list, page after page."""
+        params = dict(params, skip=0, take=self.PFM_PAGE_SIZE)
 
         while True:
-            params = {
-                "businessType": "UserProfile",
-                "accountIds": str(account._contractPfmId),
-                "include": "Merchant",
-                "parsedData": '[{"key":"transactionGranularityCode","value":"IN"},{"key":"transactionGranularityCode","value":"ST"}]',
-                "skip": current_skip_value,
-                "take": pagination_count,
-                "includeDisabledAccounts": "true",
-                "ascendingOrder": "false",
-                "orderBy": "ByParsedData",
-                "parsedDataNameToOrderBy": "accountingDate",
-                "useAndSearchForParsedData": "false",
-            }
-            headers = {
-                "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
-                "Authorization": "Bearer %s" % self.access_token,
-                "Origin": "https://www.banquepopulaire.fr",
-                "Referer": "https://www.banquepopulaire.fr/",
-                "Host": "www.rs-ext-bad-ib.banquepopulaire.fr",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-            }
-
-            self.transactions.go(params=params, method="GET", headers=headers)
+            url.go(params=params, method="GET", headers=self.data_api_headers)
             raw_json_data = self.page.get_raw_json()
-            transactions_data = json.loads(raw_json_data)
+            items = json.loads(raw_json_data)["data"]
 
-            # If nothing in transaction_data, we reached the end of the operations in this account
-            if not transactions_data["data"]:
+            # If nothing in the data, we reached the end of the operations in this account
+            if not items:
                 return
 
-            for element in transactions_data["data"]:
-                transaction = Transaction()
-                transaction.date = datetime.strptime(element["date"], "%Y-%m-%dT%H:%M:%S")
-                transaction.label = element["text"]
-                if "parsedData" in element:
-                    parsedData = element["parsedData"]
-                    if "label1" in parsedData:
-                        transaction.label += " - "
-                        transaction.label += parsedData["label1"]
-                    if "label2" in parsedData:
-                        transaction.label += " - "
-                        transaction.label += parsedData["label2"]
-                    if "label3" in parsedData:
-                        transaction.label += " - "
-                        transaction.label += parsedData["label3"]
+            yield from items
 
-                transaction.amount = element["amount"]
-                try:
-                    transaction.category = categories.get_name_by_id(element["categoryId"])
-                except (KeyError, TypeError):
-                    self.logger.debug("Fail to retrieve category for %s", transaction.label)
-                except Exception as e:
-                    self.logger.error("Skip retrieving category for %s due to exception: %s", transaction.label, e)
+            params["skip"] += self.PFM_PAGE_SIZE
 
-                yield transaction
+    def _build_transaction(self, element, categories):
+        transaction = Transaction()
+        transaction.date = datetime.strptime(element["date"], "%Y-%m-%dT%H:%M:%S")
+        transaction.label = element["text"]
 
-            current_skip_value += pagination_count
+        parsedData = element.get("parsedData") or {}
+        for label_key in ("label1", "label2", "label3"):
+            if label_key in parsedData:
+                transaction.label += " - "
+                transaction.label += parsedData[label_key]
+
+        # The bank sends the amounts as JSON floats.
+        transaction.amount = Decimal(str(element["amount"]))
+
+        try:
+            transaction.category = categories.get_name_by_id(element["categoryId"])
+        except (KeyError, TypeError):
+            self.logger.debug("Fail to retrieve category for %s", transaction.label)
+        except Exception as e:
+            self.logger.error("Skip retrieving category for %s due to exception: %s", transaction.label, e)
+
+        return transaction
+
+    @retry(LoggedOut)
+    @need_login
+    def iter_history(self, account: BanquePopulaireAccount, coming=False):
+        self.updateBearerForDataConsumptionIfNeeded()
+
+        categories = self._load_categories()
+
+        params = {
+            "businessType": "UserProfile",
+            "accountIds": str(account._contractPfmId),
+            "include": "Merchant",
+            "parsedData": json.dumps(
+                [
+                    {"key": "transactionGranularityCode", "value": "IN"},
+                    {"key": "transactionGranularityCode", "value": "ST"},
+                ],
+                separators=(",", ":"),
+            ),
+            "includeDisabledAccounts": "true",
+            "ascendingOrder": "false",
+            "orderBy": "ByParsedData",
+            "parsedDataNameToOrderBy": "accountingDate",
+            "useAndSearchForParsedData": "false",
+        }
+
+        for element in self._iter_pfm_items(self.transactions, params):
+            yield self._build_transaction(element, categories)
+
+    def _iter_pending_card_transactions(self, account, categories):
+        """Card payments already made but not booked yet.
+
+        The website lists them at the top of the history, under
+        "Opérations carte en cours". They are served by the regular transaction
+        endpoint, told apart by their ``WD`` status; the booked ones carry ``AC``.
+        """
+        params = {
+            "businessType": "UserProfile",
+            "accountIds": str(account._contractPfmId),
+            "include": "Merchant",
+            "parsedData": json.dumps(
+                [
+                    {"key": "status", "value": "WD"},
+                    {"key": "transactionGranularityCode", "value": "IN"},
+                    {"key": "transactionGranularityCode", "value": "ST"},
+                ],
+                separators=(",", ":"),
+            ),
+            "includeDisabledAccounts": "true",
+            "orderBy": "ByOriginalDate",
+            # The status must be combined with the granularity codes instead of
+            # widening the search, otherwise every booked transaction comes back.
+            "useAndSearchForParsedData": "true",
+        }
+
+        for element in self._iter_pfm_items(self.transactions, params):
+            transaction = self._build_transaction(element, categories)
+            transaction.coming = True
+
+            card = (element.get("parsedData") or {}).get("cardReference")
+            if card:
+                transaction.card = card
+                transaction.type = Transaction.TYPE_CARD
+
+            yield transaction
+
+    def _iter_scheduled_transactions(self, account, categories):
+        """Operations the bank already knows about but has not run yet.
+
+        That is the "À venir" tab of the website: direct debits and scheduled
+        transfers, served by their own endpoint.
+        """
+        params = {
+            "businessType": "UserProfile",
+            "accountIds": str(account._contractPfmId),
+            "includeDisabledAccounts": "true",
+            "paymentStatus": "Open",
+            "transactionAccountingStatus": "Up",
+        }
+
+        for element in self._iter_pfm_items(self.upcoming_transactions, params):
+            transaction = self._build_transaction(element, categories)
+            transaction.coming = True
+            transaction.type = Transaction.TYPE_ORDER
+
+            yield transaction
+
+    @retry(LoggedOut)
+    @need_login
+    def iter_coming(self, account: BanquePopulaireAccount):
+        """Operations that are not taken into account in the balance yet.
+
+        The website splits them in two lists fed by two different endpoints, so
+        we gather both: the card payments awaiting their booking, and the
+        scheduled operations to come.
+        """
+        self.updateBearerForDataConsumptionIfNeeded()
+
+        if not account._contractPfmId:
+            # Loans and the like are unknown to the PFM API, they have no coming.
+            return []
+
+        categories = self._load_categories()
+
+        coming = list(self._iter_scheduled_transactions(account, categories))
+        coming.extend(self._iter_pending_card_transactions(account, categories))
+
+        # Scheduled operations are dated in the future and card ones in the recent
+        # past, so the two lists have to be merged to stay in chronological order.
+        coming.sort(key=lambda transaction: transaction.date, reverse=True)
+        return coming
 
 
 class iter_retry:

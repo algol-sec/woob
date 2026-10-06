@@ -87,7 +87,7 @@ class BanquePopulaireModule(Module, CapBankWealth):
         return self.browser.iter_history(account)
 
     def iter_coming(self, account):
-        return None
+        return self.browser.iter_coming(account)
 
     def iter_investment(self, account):
         pass
