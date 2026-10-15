@@ -20,17 +20,19 @@
 import base64
 import json
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from uuid import uuid4
 
 from woob.browser import URL, LoginBrowser, need_login
 from woob.capabilities.bank import Account
+from woob.capabilities.bill import Subscription
 from woob.exceptions import ActionNeeded, BrowserIncorrectPassword, BrowserUnavailable
 
 from .pages import (
     AccountsPage,
     AppConfigPage,
     ComingPage,
+    DocumentsPage,
     HistoryPage,
     KeypadPage,
     LoginValidationPage,
@@ -48,6 +50,11 @@ class CreditAgricoleBrowser(LoginBrowser):
     BASEURL = "https://espace-client.credit-agricole.fr"
     CACONNECT = "https://client.ca-connect.credit-agricole.fr"
     DETAILDAV = "https://detail-dav.credit-agricole.fr"
+    HUBDOC = "https://hubdocumentaire.credit-agricole.fr"
+
+    # id_parcours du SSO vers le hub documentaire (équivalent de "DETAIL-COMPTE-DAV"
+    # pour detail-dav).
+    HUBDOC_PARCOURS = "HUB-DOCUMENTAIRE"
 
     # espace-client (synthèse)
     espace_config = URL(r"/assets/configuration/app-config.json", AppConfigPage)
@@ -74,6 +81,17 @@ class CreditAgricoleBrowser(LoginBrowser):
     dav_operations = URL(r"/(?P<region>[\w-]+)/bff/operations/imputees", HistoryPage, base="DETAILDAV")
     dav_coming = URL(r"/(?P<region>[\w-]+)/bff/operations/a-venir/detail", ComingPage, base="DETAILDAV")
 
+    # hubdocumentaire (e-documents), chemins préfixés par la région. Même logique SSO
+    # que detail-dav mais la session s'ouvre via /bff/api/security/* (comme espace-client)
+    # et la config est servie sous /fe/configuration/ (et non /fe/assets/configuration/).
+    hubdoc_config = URL(r"/(?P<region>[\w-]+)/fe/configuration/app-config.json", AppConfigPage, base="HUBDOC")
+    hubdoc_fe = URL(r"/(?P<region>[\w-]+)/fe/", base="HUBDOC")
+    hubdoc_user = URL(r"/(?P<region>[\w-]+)/bff/api/security/user", SecurityUserPage, base="HUBDOC")
+    hubdoc_login = URL(r"/(?P<region>[\w-]+)/bff/api/security/login", base="HUBDOC")
+    hubdoc_context = URL(r"/(?P<region>[\w-]+)/bff/api/context/(?P<context_id>[\w-]+)", base="HUBDOC")
+    hubdoc_documents = URL(r"/(?P<region>[\w-]+)/bff/api/hub/documents", DocumentsPage, base="HUBDOC")
+    hubdoc_download = URL(r"/(?P<region>[\w-]+)/bff/api/hub/download_document/(?P<label>.*)", base="HUBDOC")
+
     # /operations/imputees est cumulatif et sans pagination par paramètre : chaque
     # appel renvoie tout le déjà-chargé plus ~90 opérations. On le rappelle jusqu'à
     # hasNext=False (garde-fou pour borner les très gros comptes).
@@ -87,6 +105,7 @@ class CreditAgricoleBrowser(LoginBrowser):
         self.structure_id = None
         self.oauth_params = None
         self._logged = False
+        self._hub_ready = False
         self.session.headers.update(
             {
                 "User-Agent": CHROME_UA,
@@ -131,6 +150,8 @@ class CreditAgricoleBrowser(LoginBrowser):
     def do_login(self):
         if not self.username or not self.password:
             raise BrowserIncorrectPassword()
+
+        self._hub_ready = False
 
         self.client_id = self.espace_config.go().get_client_id()
         self.structure_id = self.caconnect_config.go().get_structure_id(self.region)
@@ -253,6 +274,79 @@ class CreditAgricoleBrowser(LoginBrowser):
         # sans cet appel, /operations/imputees renvoie 400 car la session re-loguée
         # ne sait pas quel compte interroger.
         self.dav_context.go(region=region, params={"contextId": context_id})
+
+    def _open_hubdoc(self):
+        # SSO vers le hub documentaire, calqué sur _open_detail_dav : le BFF espace-client
+        # émet un context_id, puis on ré-authentifie côté hubdocumentaire via CA-Connect.
+        region = self.region
+        self.sso.go(
+            json={
+                "id_parcours": self.HUBDOC_PARCOURS,
+                "nav_context": json.dumps({"contexte_specifique": {}}),
+            },
+        )
+        context_id = self.page.get_context_id()
+        self.hubdoc_fe.go(region=region, params={"sso": "AzCode", "context_id": context_id})
+        self.hubdoc_user.go(region=region)
+        state = self.page.get_state()
+        client_id = self.hubdoc_config.go(region=region).get_client_id()
+        hub_redirect = f"{self.HUBDOC}/{region}/fe/"
+        self.authorize.go(
+            params={
+                "client_id": client_id,
+                "redirect_uri": hub_redirect,
+                "response_type": "code",
+                "scope": "openid",
+                "marche_derive": "particulier",
+                "state": state,
+            }
+        )
+        code = parse_qs(urlparse(self.url).query).get("code", [None])[0]
+        # Le hub échange le code en GET (contrairement au detail-dav qui POST un JSON).
+        self.hubdoc_login.go(
+            region=region,
+            params={"code": code, "state": state, "redirect_uri": hub_redirect},
+        )
+        # Arme le contexte côté hub : sans cet appel, /hub/documents renvoie 500
+        # (même nécessité que dav_context pour detail-dav).
+        self.hubdoc_context.go(region=region, context_id=context_id)
+        self._hub_ready = True
+
+    @need_login
+    def iter_subscriptions(self):
+        # Le hub expose un espace documentaire unique (tous contrats et tous titulaires
+        # confondus) : un seul abonnement suffit pour tout lister/télécharger.
+        sub = Subscription()
+        sub.id = self.username
+        sub.label = f"Documents Crédit Agricole {self.region}"
+        yield sub
+
+    @need_login
+    def iter_documents(self, subscription):
+        self._open_hubdoc()
+        self.hubdoc_documents.go(region=self.region, params={"texte": ""})
+        return self.page.iter_documents(subid=subscription.id)
+
+    @need_login
+    def download_document(self, document):
+        if not self._hub_ready:
+            self._open_hubdoc()
+        # Query construite à la main : le site envoie format=application/pdf non encodé
+        # (le "/" reste littéral) ; urlencode le transformerait en %2F et le hub refuse.
+        params = {
+            "document_id": document._docid,
+            "key_id": document._key,
+            "origine": document._origine,
+            "format": document._format_mime,
+            "categorie_id": document._categorie_id,
+        }
+        query = "&".join(f"{key}={value}" for key, value in params.items())
+        # Le libellé sert de segment de chemin : tout "/" (présent dans les dates des
+        # relevés, ex "Relevé n°010 du 05/10/2026") casse le routage et renvoie 404.
+        # On le remplace par une espace avant encodage (comportement du site).
+        label = quote(document._libelle.replace("/", " "), safe="")
+        url = self.hubdoc_download.build(region=self.region, label=label)
+        return self.open(f"{url}?{query}").content
 
     @need_login
     def iter_history(self, account):

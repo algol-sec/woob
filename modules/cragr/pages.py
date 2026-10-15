@@ -21,10 +21,11 @@ import re
 
 from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
-from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Env, Format
+from woob.browser.filters.standard import CleanDecimal, CleanText, Coalesce, Date, Env, Format
 from woob.browser.pages import JsonPage
 from woob.capabilities.bank import Account, Transaction
 from woob.capabilities.base import NotAvailable
+from woob.capabilities.bill import Document, DocumentTypes
 from woob.tools.date import parse_french_date
 
 
@@ -256,3 +257,49 @@ class ComingPage(CragrJsonPage):
                     yield from bloc.get("operationDetails", [])
 
         item = TransactionItem
+
+
+# Mapping idTypeDocument (hub documentaire) -> type woob. "Documents fiscaux" (00006)
+# n'a pas d'équivalent dédié dans DocumentTypes : rangé en OTHER.
+DOCUMENT_TYPES = {
+    "00004": DocumentTypes.STATEMENT,  # Relevés
+    "00005": DocumentTypes.CERTIFICATE,  # Attestations
+    "00006": DocumentTypes.OTHER,  # Documents fiscaux
+    "00014": DocumentTypes.CONTRACT,  # Contrats
+    "00015": DocumentTypes.NOTICE,  # Courriers
+    "00016": DocumentTypes.OTHER,  # Autres
+}
+
+
+class DocumentsPage(CragrJsonPage):
+    @method
+    class iter_documents(DictElement):
+        item_xpath = "listeDocument"
+        # Le même document peut apparaître deux fois selon le filtre serveur : on dédoublonne.
+        ignore_duplicate = True
+
+        class item(ItemElement):
+            klass = Document
+
+            # L'id woob est préfixé par l'id d'abonnement (convention CapDocument :
+            # get_document retrouve l'abonnement via _id.split("_")[0]).
+            obj_id = Format("%s_%s", Env("subid"), CleanText(Dict("id")))
+            obj_label = CleanText(Dict("libelle"))
+            obj_date = Date(CleanText(Dict("dateCreation", default="")), default=NotAvailable)
+            obj_format = "pdf"
+            obj_number = Coalesce(
+                CleanText(Dict("contrat/id", default=""), default=""),
+                default=NotAvailable,
+            )
+
+            # Champs bruts conservés pour reconstruire l'URL de téléchargement
+            # (cf. CreditAgricoleBrowser.download_document).
+            obj__docid = CleanText(Dict("id"))
+            obj__key = CleanText(Dict("key"))
+            obj__origine = CleanText(Dict("origine", default="EDOC"), default="EDOC")
+            obj__categorie_id = CleanText(Dict("idCategorie", default=""), default="")
+            obj__format_mime = CleanText(Dict("formatDocument", default="application/pdf"), default="application/pdf")
+            obj__libelle = CleanText(Dict("libelle"))
+
+            def obj_type(self):
+                return DOCUMENT_TYPES.get(Dict("idTypeDocument", default="")(self), DocumentTypes.OTHER)

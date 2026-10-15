@@ -20,6 +20,8 @@
 from collections import OrderedDict
 
 from woob.capabilities.bank import CapBank
+from woob.capabilities.base import find_object
+from woob.capabilities.bill import CapDocument, Document, DocumentNotFound, DocumentTypes, Subscription
 from woob.tools.backend import BackendConfig, Module
 from woob.tools.value import Value, ValueBackendPassword
 
@@ -29,7 +31,7 @@ from .browser import CreditAgricoleBrowser
 __all__ = ["CreditAgricoleModule"]
 
 
-class CreditAgricoleModule(Module, CapBank):
+class CreditAgricoleModule(Module, CapBank, CapDocument):
     NAME = "cragr"
     MAINTAINER = "Quentin Defenouillère"
     EMAIL = "quentin.defenouillere@budget-insight.com"
@@ -126,6 +128,14 @@ class CreditAgricoleModule(Module, CapBank):
 
     BROWSER = CreditAgricoleBrowser
 
+    accepted_document_types = (
+        DocumentTypes.STATEMENT,
+        DocumentTypes.CERTIFICATE,
+        DocumentTypes.CONTRACT,
+        DocumentTypes.NOTICE,
+        DocumentTypes.OTHER,
+    )
+
     CONFIG = BackendConfig(
         Value("website", label="Caisse Régionale", choices=region_choices, aliases=region_aliases),
         ValueBackendPassword("login", label="Identifiant à 11 chiffres", masked=False, regexp=r"\d{11}"),
@@ -147,3 +157,24 @@ class CreditAgricoleModule(Module, CapBank):
 
     def iter_coming(self, account):
         return self.browser.iter_coming(account)
+
+    def iter_subscription(self):
+        return self.browser.iter_subscriptions()
+
+    def get_subscription(self, _id):
+        return find_object(self.iter_subscription(), id=_id, error=DocumentNotFound)
+
+    def iter_documents(self, subscription):
+        if not isinstance(subscription, Subscription):
+            subscription = self.get_subscription(subscription)
+        return self.browser.iter_documents(subscription)
+
+    def get_document(self, _id):
+        subscription_id = _id.split("_")[0]
+        subscription = self.get_subscription(subscription_id)
+        return find_object(self.iter_documents(subscription), id=_id, error=DocumentNotFound)
+
+    def download_document(self, document):
+        if not isinstance(document, Document):
+            document = self.get_document(document)
+        return self.browser.download_document(document)
