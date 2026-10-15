@@ -97,9 +97,13 @@ class CreditAgricoleBrowser(LoginBrowser):
     # hasNext=False (garde-fou pour borner les très gros comptes).
     MAX_HISTORY_CALLS = 50
 
-    def __init__(self, website, username, password, *args, **kwargs):
+    def __init__(self, website, username, password, marche="particulier", *args, **kwargs):
         super().__init__(username, password, *args, **kwargs)
         self.website = website
+        # Marché de l'espace (particulier/professionnel) : conditionne le chemin de
+        # redirection et le marche_derive du flux OAuth, et donc les comptes et documents
+        # retournés (un même identifiant peut donner accès à plusieurs espaces).
+        self.marche = marche or "particulier"
         self.region = re.sub(r"^www\.", "", website).replace(".fr", "")
         self.client_id = None
         self.structure_id = None
@@ -158,7 +162,7 @@ class CreditAgricoleBrowser(LoginBrowser):
         if not self.structure_id:
             raise BrowserUnavailable("Caisse régionale inconnue : %s" % self.region)
 
-        redirect_uri = f"{self.BASEURL}/{self.region}/particulier"
+        redirect_uri = f"{self.BASEURL}/{self.region}/{self.marche}"
 
         # Le BFF génère le state/csid de la session OAuth : on doit les réutiliser
         # (un state fabriqué mène à « Identifiants de session invalides »).
@@ -170,7 +174,7 @@ class CreditAgricoleBrowser(LoginBrowser):
             raise BrowserUnavailable("Initialisation de session impossible")
 
         nav_context_data = {
-            "marche_derive": "particulier",
+            "marche_derive": self.marche,
             "code_charte": "V",
             "portail_origine": "PortailClient",
             "theme": "light",
@@ -183,7 +187,7 @@ class CreditAgricoleBrowser(LoginBrowser):
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": "openid",
-            "marche_derive": "particulier",
+            "marche_derive": self.marche,
             "state": state,
             "structure_id": self.structure_id,
             "nav_context": nav_context,
@@ -261,7 +265,7 @@ class CreditAgricoleBrowser(LoginBrowser):
                 "redirect_uri": dav_redirect,
                 "response_type": "code",
                 "scope": "openid",
-                "marche_derive": "particulier",
+                "marche_derive": self.marche,
                 "state": state,
             }
         )
@@ -297,7 +301,7 @@ class CreditAgricoleBrowser(LoginBrowser):
                 "redirect_uri": hub_redirect,
                 "response_type": "code",
                 "scope": "openid",
-                "marche_derive": "particulier",
+                "marche_derive": self.marche,
                 "state": state,
             }
         )

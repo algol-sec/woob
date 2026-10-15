@@ -140,6 +140,12 @@ class CreditAgricoleModule(Module, CapBank, CapDocument):
         Value("website", label="Caisse Régionale", choices=region_choices, aliases=region_aliases),
         ValueBackendPassword("login", label="Identifiant à 11 chiffres", masked=False, regexp=r"\d{11}"),
         ValueBackendPassword("password", label="Code personnel à 6 chiffres", regexp=r"\d{6}"),
+        Value(
+            "marche",
+            label="Espace",
+            choices={"particulier": "Particulier", "professionnel": "Professionnel"},
+            default="particulier",
+        ),
     )
 
     def create_default_browser(self):
@@ -147,6 +153,7 @@ class CreditAgricoleModule(Module, CapBank, CapDocument):
             self.config["website"].get(),
             self.config["login"].get(),
             self.config["password"].get(),
+            marche=self.config["marche"].get(),
         )
 
     def iter_accounts(self):
