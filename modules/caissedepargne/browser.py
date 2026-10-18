@@ -18,6 +18,7 @@
 # flake8: compatible
 
 
+import re
 import time
 from base64 import b64decode
 from datetime import date, timedelta
@@ -92,6 +93,23 @@ from .pages import (
 
 
 __all__ = ["CaisseEpargne"]
+
+
+def iter_js_continue_urls(text):
+    """Yield every `continueUrls:{...}` object literal of a JS bundle, as a dict."""
+    for match in re.finditer(r"continueUrls:\{", text):
+        start = match.end() - 1
+        depth = 0
+        for end in range(start, len(text)):
+            depth += {"{": 1, "}": -1}.get(text[end], 0)
+            if depth == 0:
+                break
+        # JS object literal -> JSON: quote the bare keys
+        literal = re.sub(r"([{,])\s*([A-Za-z_$][\w$]*|\d+)\s*:", r'\1"\2":', text[start : end + 1])
+        try:
+            yield json.loads(literal)
+        except ValueError:
+            continue
 
 
 class CaisseEpargneLogin(TwoFactorBrowser):
@@ -307,8 +325,32 @@ class CaisseEpargneLogin(TwoFactorBrowser):
             # continue_url, as named by the website, is a redirect_uri needed
             # during the multiple authorization processes.
             timestamp = int(time.time() * 1000)
-            self.config_page.go(timestamp=timestamp)
-            self.continue_url = self.page.get_continue_url(self.cdetab, self.connection_type)
+            try:
+                self.config_page.go(timestamp=timestamp)
+                self.continue_url = self.page.get_continue_url(self.cdetab, self.connection_type)
+            except ClientError as e:
+                if e.response.status_code != 403:
+                    raise
+                # config.json answers 403 since October 2026: the same continueUrls
+                # are now embedded in the JS chunks of the login application.
+                self.continue_url = self.get_continue_url_from_login_js()
+
+    def get_continue_url_from_login_js(self):
+        # Same login application as self.login, so that child modules
+        # (btpbanque, creditcooperatif cenet...) read their own domain.
+        login_app = re.match(r"https://[^/]+/se-connecter/", self.login.urls[0]).group(0)
+        html = self.open(login_app).text
+        found_continue_urls = False
+        for name in dict.fromkeys(re.findall(r"\b(?:chunk|main)-[A-Z0-9]{8}\.js\b", html)):
+            for urls in iter_js_continue_urls(self.open(login_app + name).text):
+                found_continue_urls = True
+                bank = urls.get("dei", {}).get(str(self.cdetab))
+                if bank:
+                    return bank[self.connection_type]
+        if not found_continue_urls:
+            raise AssertionError(f'Could not find "continueUrls" in {login_app} JS chunks, check if it was updated')
+        # continueUrls were found but none for this cdetab, as ConfigPage.get_continue_url
+        raise BrowserIncorrectPassword()
 
     def get_cdetab(self):
         # Useful for child modules
