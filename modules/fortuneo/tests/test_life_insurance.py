@@ -6,8 +6,6 @@ from decimal import Decimal
 from unittest import TestCase
 
 from woob.capabilities.bank import Transaction
-from woob.capabilities.base import NotAvailable
-
 from ..pages.accounts_list import (
     LifeInsuranceTransactionApiPage,
     LifeInsuranceTransactionDetailApiPage,
