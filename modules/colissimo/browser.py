@@ -15,14 +15,18 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
-import re
+from __future__ import annotations
 
-from dateutil.parser import parse as parse_date
+from typing import Any
 
 from woob.browser import URL, PagesBrowser
+from woob.browser.elements import DictElement, ItemElement, ListElement, method
+from woob.browser.filters.json import Dict
+from woob.browser.filters.standard import Coalesce, DateTime
 from woob.browser.pages import HTMLPage, JsonPage
 from woob.browser.profiles import Firefox
-from woob.capabilities.parcel import Event, Parcel, ParcelNotFound
+from woob.capabilities.base import NotAvailable
+from woob.capabilities.parcel import Event, Parcel
 
 
 __all__ = ["ColissimoBrowser"]
@@ -32,49 +36,64 @@ class MainPage(HTMLPage):
     pass
 
 
+STATUSES_MAP = {
+    "AARNAT": Parcel.STATUS_IN_TRANSIT,  # in transit to local distribution site
+    "ACHNAT": Parcel.STATUS_IN_TRANSIT,  # in transit
+    "ACHIECA": Parcel.STATUS_IN_TRANSIT,  # error in transit
+    "EDRCOU": Parcel.STATUS_IN_TRANSIT,  # parcel collected by transporter
+    "DISTOU": Parcel.STATUS_IN_TRANSIT,  # at local distribution site
+    "DISIRST": Parcel.STATUS_IN_TRANSIT,  # could not deliver, retrying
+    "DISIECIN": Parcel.STATUS_IN_TRANSIT,  # could not deliver, receipt in mailbox
+    "DISINS": Parcel.STATUS_IN_TRANSIT,  # on hold at local distribution site
+    "DESLIVD": Parcel.STATUS_ARRIVED,  # parcel delivered
+    "DESLIVHD": Parcel.STATUS_ARRIVED,  # parcel delivered
+    "DI1": Parcel.STATUS_ARRIVED,  # parcel delivered
+    "DR1": Parcel.STATUS_PLANNED,
+}
+
+
 class TrackingPage(JsonPage):
-    def build_event(self, idx, item):
-        event = Event(idx)
-        event.date = parse_date(item["date"], ignoretz=True)
-        event.activity = item["label"]
-        return event
 
-    STATUSES = {
-        re.compile(
-            r"remis au gardien ou" + r"|Votre colis est livré" + r"|Votre courrier a été distribué à l'adresse"
-        ): Parcel.STATUS_ARRIVED,
-        re.compile(
-            r"pas encore pris en charge par La Poste"
-            + r"|a été déposé dans un point postal"
-            + r"|en cours de préparation"
-        ): Parcel.STATUS_PLANNED,
-    }
+    @method
+    class iter_parcels(ListElement):
+        def find_elements(self) -> dict[str, Any]:
+            """Iterate JSON list."""
+            yield from self.el
 
-    def get_info(self, _id):
-        if self.doc.get("shipment", {}).get("idShip", None) != _id:
-            raise ParcelNotFound(f"Parcel ID {_id} not found.")
-        p = Parcel(_id)
-        events = [self.build_event(i, item) for i, item in enumerate(self.doc["shipment"]["event"])]
-        p.history = events
+        class item(ItemElement):
+            item_xpath = "shipment"
+            klass = Parcel
 
-        first = events[0]
-        p.info = first.activity
-        context_data = self.doc["shipment"].get("contextData", {})
-        delivery_mode = context_data.get("deliveryMode", None)
-        if delivery_mode:
-            p.info += " " + delivery_mode
-        partner_reference = context_data.get("partner", {}).get("reference", None)
-        if partner_reference:
-            p.info += f" Partner reference: {partner_reference}"
+            obj_arrival = Coalesce(
+                DateTime(Dict("deliveryDate", default=NotAvailable)),
+                DateTime(Dict("estimDate", default=NotAvailable)),
+            )
 
-        for pattern, status in self.STATUSES.items():
-            if pattern.search(p.info):
-                p.status = status
-                break
-        else:
-            p.status = p.STATUS_IN_TRANSIT
+            def obj_status(self):
+                """Parcel status.
 
-        return p
+                Chronopost currentState does not have code, use shortLabel as fallback.
+                """
+                code = Dict("currentState/code", default=None)(self)
+                if code:
+                    return STATUSES_MAP.get(code, Parcel.STATUS_UNKNOWN)
+
+                if Dict("currentState/shortLabel")(self) == "Livré":
+                    return Parcel.STATUS_ARRIVED
+
+                return Parcel.STATUS_UNKNOWN
+
+            obj_info = Dict("currentState")
+
+            class obj_history(DictElement):
+                item_xpath = "event"
+
+                class item(ItemElement):
+                    klass = Event
+
+                    obj_date = DateTime(Dict("date"))
+                    obj_activity = Dict("label")
+                    obj_location = Dict("country", default=None)
 
 
 class ColissimoBrowser(PagesBrowser):
@@ -82,9 +101,9 @@ class ColissimoBrowser(PagesBrowser):
     PROFILE = Firefox()
 
     main_url = URL(r"/outils/suivre-vos-envois\?code=(?P<_id>.*)", MainPage)
-    tracking_url = URL(r"https://api\.laposte\.fr/ssu/v1/suivi-unifie/idship/(?P<_id>.*)", TrackingPage)
+    tracking_url = URL(r"/ssu/sun/back/suivi-unifie/(?P<_id>.*)\?lang=fr", TrackingPage)
 
-    def get_tracking_info(self, _id):
+    def get_tracking_info(self, _id: str) -> Parcel:
         self.main_url.stay_or_go(_id=_id)
         self.tracking_url.stay_or_go(_id=_id, headers={"Accept": "application/json"})
-        return self.page.get_info(_id)
+        return next(self.page.iter_parcels(_id))
