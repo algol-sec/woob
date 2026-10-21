@@ -2142,7 +2142,7 @@ class LIAccountsPage(LoggedPage, HTMLPage):
 
     def go_accounts_list(self):
         form = self.get_form(
-            xpath="//form[@id='C:P1:F' or @id='C:P14:F' or @id='C:P4:F' or @id='C:P5:F'or @id='C:P6:F']",
+            xpath='//form[.//input[@name="_FID_GoBusinessSpaceLife"]]',
             submit='//input[@name="_FID_GoBusinessSpaceLife"]',
         )
         form.submit()
