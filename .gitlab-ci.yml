@@ -28,7 +28,7 @@ stages:
   - build
 
 .python_version: &python-base-env
-  image: python:3.9
+  image: python:3.11
   before_script:
     - python -m pip install --upgrade pip setuptools
     - python -m pip install --upgrade -e . --group dev
@@ -38,8 +38,6 @@ stages:
   parallel:
     matrix: &python-support-matrix
       - PYTHON_VERSION:
-          - "3.9"
-          - "3.10"
           - "3.11"
           - "3.12"
           - "3.13"

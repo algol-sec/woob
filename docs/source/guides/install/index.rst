@@ -2,7 +2,7 @@
 Installation
 ============
 
-woob requires at least Python 3.7 to work.
+woob requires at least Python 3.11 to work.
 
 From PyPI
 =========

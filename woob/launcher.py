@@ -87,8 +87,8 @@ class Launcher:
 
     @classmethod
     def run(cls):
-        if sys.version_info < (3, 9):
-            print("woob requires python >= 3.9 to work", file=sys.stderr)
+        if sys.version_info < (3, 11):
+            print("woob requires python >= 3.11 to work", file=sys.stderr)
             return 1
 
         app_list = cls.list_apps()

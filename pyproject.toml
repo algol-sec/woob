@@ -10,18 +10,16 @@ name = "woob"
 version = "3.7"
 description = "Woob, Web Outside Of Browsers"
 authors = [
-    {name = "Romain Bignon", email = "romain@woob.dev"},
+    { name = "Romain Bignon", email = "romain@woob.dev" },
 ]
 readme = "README.rst"
-license = {text = "LGPL-3.0-or-later"}
+license = { text = "LGPL-3.0-or-later" }
 keywords = ["scraping", "web", "banking"]
 classifiers = [
     "Environment :: Console",
     "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -32,7 +30,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Markup :: HTML",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "lxml",
     # `requests` versions 2.32.0, 2.32.1, and 2.32.2 are affected by a bug breaking the ability to specify
@@ -147,7 +145,7 @@ extend-ignore = [
     # disable flake8-import-order, isort and black are in charge
     "I",
 ]
-min-version = "3.9"
+min-version = "3.11"
 per-file-ignores = [
     "woob/applications/*:T201",
     "woob/browser/elements.py:T201",
@@ -199,7 +197,7 @@ include = ["woob", "woob.*", "weboob"]
 
 [tool.tox]
 requires = ["tox>=4.21"]
-env_list = ["py39", "py310", "py311", "py312", "py313", "bandit", "build"]
+env_list = ["py311", "py312", "py313", "bandit", "build"]
 
 [tool.tox.env_run_base]
 deps = [
