@@ -1,6 +1,5 @@
 import itertools
 import ssl
-import sys
 
 import pytest
 import requests
@@ -15,19 +14,6 @@ BADSSL_HOSTS = ("self-signed.badssl.com", "self-signed.testserver.host")
 BADSSL_MAX_ATTEMPTS = 6
 
 
-def _get_server_certificate(host):
-    if sys.version_info >= (3, 10):
-        return ssl.get_server_certificate((host, 443))
-
-    # On older versions of Python, ssl.get_server_certificate() doesn't
-    # support SNI.
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-    with ssl.create_connection((host, 443)) as sock:
-        with context.wrap_socket(sock, server_hostname=host) as sslsock:
-            der_cert = sslsock.getpeercert(True)
-            return ssl.DER_cert_to_PEM_cert(der_cert)
-
-
 @pytest.fixture(scope="function")
 def badssl_self_signed(tmp_path_factory):
     bundle_path = tmp_path_factory.mktemp("ca_bundle") / "selfsignedbundle.pem"
@@ -37,7 +23,7 @@ def badssl_self_signed(tmp_path_factory):
     last_exc = None
     for host in itertools.islice(itertools.cycle(BADSSL_HOSTS), BADSSL_MAX_ATTEMPTS):
         try:
-            pem_cert = _get_server_certificate(host)
+            pem_cert = ssl.get_server_certificate((host, 443))
         except OSError as exc:
             last_exc = exc
             continue
