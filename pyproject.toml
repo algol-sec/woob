@@ -206,7 +206,7 @@ deps = [
 ]
 dependency_groups = ["tests"]
 pass_env = ["REQUESTS_CA_BUNDLE"]
-commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules", {replace = "posargs", default = [], extend = true}]]
+commands = [["pytest", "--cov=woob", "-Wignore", "--doctest-modules", { replace = "posargs", default = [], extend = true }]]
 
 [tool.tox.env.bandit]
 deps = ["bandit"]
