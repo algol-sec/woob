@@ -20,11 +20,11 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from http.cookiejar import Cookie
 from io import BytesIO, StringIO
 from tempfile import mkstemp
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional, Protocol, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Protocol, TypeVar, cast, overload
 
 
 if TYPE_CHECKING:

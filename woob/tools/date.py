@@ -24,9 +24,7 @@ from collections.abc import Iterable
 from datetime import date as real_date
 from datetime import datetime as real_datetime
 from datetime import timedelta
-from typing import Any, Union
-
-from typing_extensions import Self
+from typing import Any, Self, Union
 
 
 try:

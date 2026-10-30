@@ -28,13 +28,14 @@ import tempfile
 import warnings
 import zlib
 from collections import OrderedDict
+from collections.abc import Callable
 from copy import copy, deepcopy
 from datetime import datetime, timedelta
 from functools import wraps
 from hashlib import sha256
 from logging import Logger
 from threading import Lock
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 from uuid import uuid4
 

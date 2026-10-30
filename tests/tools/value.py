@@ -20,7 +20,8 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import Mock
 
 import pytest

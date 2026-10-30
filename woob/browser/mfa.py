@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 from dateutil import parser, tz
 

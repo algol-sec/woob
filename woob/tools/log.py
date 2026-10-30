@@ -58,13 +58,7 @@ class LoggerSettings(Protocol):
 class WoobLogger(LoggerSettings, Logger): ...
 
 
-try:
-
-    class WoobLoggerAdapter(LoggerSettings, LoggerAdapter[WoobLogger]): ...
-
-except TypeError:  # py39
-
-    class WoobLoggerAdapter(LoggerSettings, LoggerAdapter): ...
+class WoobLoggerAdapter(LoggerSettings, LoggerAdapter[WoobLogger]): ...
 
 
 @overload

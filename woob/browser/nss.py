@@ -393,7 +393,7 @@ def ssl_wrap_socket(sock, *args, **kwargs):
             # but rather something SyscallError.
             # i don't know how to generate it exactly and the end result is
             # similar so let's use this.
-            raise socket.timeout()
+            raise TimeoutError()
 
         # see below why closing
         wrapper.close()

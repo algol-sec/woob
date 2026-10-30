@@ -17,9 +17,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from threading import Event, RLock, Timer
-from typing import Any, Callable
+from typing import Any
 
 from woob.tools.log import getLogger
 from woob.tools.misc import get_backtrace

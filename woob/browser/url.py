@@ -18,8 +18,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import unquote
 
 import requests

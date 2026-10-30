@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import functools
 import os
+from collections.abc import Callable
 from datetime import datetime
 from logging import Logger
-from typing import Any, Callable
+from typing import Any
 
 from woob.tools.log import getLogger
 

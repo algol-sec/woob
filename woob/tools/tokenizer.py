@@ -18,8 +18,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
-from typing import Callable
+from collections.abc import Callable, Iterable
 
 
 __all__ = ["ReTokenizer"]

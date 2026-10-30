@@ -45,7 +45,7 @@ class ReadPage(JsonPage):
 
     def get_expire(self):
         ts = self.doc["meta"]["created"] + self.doc["meta"]["time_to_live"]
-        return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
+        return datetime.datetime.fromtimestamp(ts, datetime.UTC)
 
     def has_paste(self):
         return "id" in self.doc

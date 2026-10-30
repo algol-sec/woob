@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 from unittest import TestCase, TestResult
 from unittest.case import SkipTest
 

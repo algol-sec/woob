@@ -24,8 +24,9 @@ import sys
 import traceback
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any
 
 import lxml.html
 

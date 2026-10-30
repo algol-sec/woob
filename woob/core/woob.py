@@ -20,9 +20,9 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from woob import __version__
 from woob.capabilities.base import Capability

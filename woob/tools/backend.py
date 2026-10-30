@@ -22,14 +22,14 @@ import logging
 import os
 import types
 import warnings
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from copy import copy
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 from urllib.request import getproxies
 
 from packaging.version import Version
-from typing_extensions import Self, Unpack
+from typing_extensions import Unpack
 
 from woob import __version__
 from woob.capabilities.base import BaseObject, Capability, FieldNotFound, NotAvailable, NotLoaded

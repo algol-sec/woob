@@ -25,12 +25,11 @@ import sys
 import traceback
 import types
 import unicodedata
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from time import sleep, time
-from typing import Any, Callable, Generic, Literal, TextIO, TypeVar, cast
+from typing import Any, Generic, Literal, Self, TextIO, TypeVar, cast
 
 import unidecode
-from typing_extensions import Self
 
 
 __all__ = [

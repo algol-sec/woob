@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 import queue
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from copy import copy
 from threading import Event, Thread
-from typing import Any, Callable
+from typing import Any
 
 from woob.capabilities.base import BaseObject
 from woob.tools.backend import Module

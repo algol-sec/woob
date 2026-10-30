@@ -18,8 +18,9 @@
 
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from threading import RLock
-from typing import Any, Callable
+from typing import Any
 
 
 __all__ = ["RequestsManager"]

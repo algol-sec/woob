@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Protocol, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, Protocol, TypeVar, cast
 
 
 __all__ = ["retry"]

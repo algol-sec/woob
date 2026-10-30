@@ -20,9 +20,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
-from typing import IO, TYPE_CHECKING, ClassVar, TypeVar, Union, cast
-
-from typing_extensions import Self
+from typing import IO, TYPE_CHECKING, ClassVar, Self, TypeVar, Union, cast
 
 
 if TYPE_CHECKING:

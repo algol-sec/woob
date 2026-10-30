@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import shlex
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import requests
-from typing_extensions import NotRequired
 
 from woob.tools.json import json
 
