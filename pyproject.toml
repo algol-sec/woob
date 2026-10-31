@@ -49,7 +49,6 @@ dependencies = [
     "termcolor",
     "schwifty >= 2024.1",
     "deprecated",
-    "typing-extensions >= 4.2",
 ]
 
 [project.scripts]

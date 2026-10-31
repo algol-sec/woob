@@ -23,9 +23,7 @@ from collections import defaultdict
 from collections.abc import MutableMapping
 from logging import Formatter, Logger, LoggerAdapter, LogRecord, addLevelName
 from logging import getLogger as _getLogger
-from typing import Any, cast, overload
-
-from typing_extensions import Protocol
+from typing import Any, Protocol, cast, overload
 
 
 __all__ = ["getLogger", "createColoredFormatter", "settings"]
