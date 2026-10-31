@@ -89,6 +89,7 @@ docs = [
     "sphinxcontrib-jquery",
 ]
 tests = [
+    "cryptography",
     "prettytable==3.6.0",
     "responses==0.23.1",
 ]
