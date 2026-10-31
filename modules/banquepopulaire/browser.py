@@ -32,7 +32,7 @@ from woob.browser.exceptions import ClientError, HTTPNotFound, ServerError
 from woob.browser.mfa import TwoFactorBrowser
 from woob.browser.pages import HTMLPage
 from woob.capabilities.bank import Account, Transaction
-from woob.capabilities.base import find_object
+from woob.capabilities.base import NotAvailable, find_object
 from woob.exceptions import (
     AppValidation,
     AppValidationExpired,
@@ -249,6 +249,9 @@ class BanquePopulaire(TwoFactorBrowser):
         self.login_challenge = None
 
         self.documents_headers = None
+
+        # PFM category names by id, fetched once on the first need.
+        self.pfm_categories = None
 
         self.AUTHENTICATION_METHODS = {
             "code_sms": self.handle_sms,
@@ -1020,15 +1023,26 @@ class BanquePopulaire(TwoFactorBrowser):
             "Sec-Fetch-Site": "same-site",
         }
 
-    def _load_categories(self):
-        """Fetch the PFM category tree, used to name the category of a transaction."""
-        params = {"businessType": "UserProfile", "subcategoryStructure": "Tree", "culture": "fr-FR"}
+    def _get_categories(self):
+        """Get the PFM category names by id, used to name the category of a transaction.
 
-        self.category_page.go(headers=self.data_api_headers, params=params)
+        The tree is the same for every account, so it is fetched only once. Failing
+        to get it must not prevent from listing the transactions, which are then
+        just left without a category.
+        """
+        if self.pfm_categories is None:
+            params = {"businessType": "UserProfile", "subcategoryStructure": "Tree", "culture": "fr-FR"}
+            try:
+                self.category_page.go(headers=self.data_api_headers, params=params)
+                categories = CategoryLoader()
+                categories.load(self.page.doc)
+            except (ClientError, ServerError, ValueError) as e:
+                self.logger.warning("Could not fetch the PFM categories: %s", e)
+                self.pfm_categories = {}
+            else:
+                self.pfm_categories = categories.lookup
 
-        categories = CategoryLoader()
-        categories.load(self.page.doc)
-        return categories
+        return self.pfm_categories
 
     def _iter_pfm_items(self, url, params):
         """Yield every entry of a paginated PFM list, page after page."""
@@ -1051,23 +1065,22 @@ class BanquePopulaire(TwoFactorBrowser):
     def _build_transaction(self, element, categories):
         transaction = Transaction()
         transaction.date = datetime.strptime(element["date"], "%Y-%m-%dT%H:%M:%S")
-        transaction.label = element["text"]
 
         parsedData = element.get("parsedData") or {}
-        for label_key in ("label1", "label2", "label3"):
-            if label_key in parsedData:
-                transaction.label += " - "
-                transaction.label += parsedData[label_key]
+        labels = (element["text"], *(parsedData.get(key) for key in ("label1", "label2", "label3")))
+        # Any of the additional labels may be missing, null or blank.
+        transaction.label = " - ".join(label.strip() for label in labels if label and label.strip())
+        transaction.raw = parsedData.get("originalText") or transaction.label
+        transaction._ref = parsedData.get("transactionReference", NotAvailable)
 
         # The bank sends the amounts as JSON floats.
         transaction.amount = Decimal(str(element["amount"]))
 
-        try:
-            transaction.category = categories.get_name_by_id(element["categoryId"])
-        except (KeyError, TypeError):
+        category = categories.get(element.get("categoryId"))
+        if category:
+            transaction.category = category
+        else:
             self.logger.debug("Fail to retrieve category for %s", transaction.label)
-        except Exception as e:
-            self.logger.error("Skip retrieving category for %s due to exception: %s", transaction.label, e)
 
         return transaction
 
@@ -1076,7 +1089,7 @@ class BanquePopulaire(TwoFactorBrowser):
     def iter_history(self, account: BanquePopulaireAccount, coming=False):
         self.updateBearerForDataConsumptionIfNeeded()
 
-        categories = self._load_categories()
+        categories = self._get_categories()
 
         params = {
             "businessType": "UserProfile",
@@ -1137,13 +1150,12 @@ class BanquePopulaire(TwoFactorBrowser):
             yield transaction
 
     @staticmethod
-    def _deduce_type(element):
+    def _deduce_type(raw):
         """Guess the type of a transaction from its raw label.
 
         The labels follow the same conventions as on the other BPCE banks, so
         reuse the patterns of the Caisse d'Épargne module.
         """
-        raw = (element.get("parsedData") or {}).get("originalText") or element["text"]
         for pattern, transaction_type in CaisseEpargneTransaction.PATTERNS:
             if pattern.match(raw):
                 return transaction_type
@@ -1166,7 +1178,7 @@ class BanquePopulaire(TwoFactorBrowser):
         for element in self._iter_pfm_items(self.upcoming_transactions, params):
             transaction = self._build_transaction(element, categories)
             transaction.coming = True
-            transaction.type = self._deduce_type(element)
+            transaction.type = self._deduce_type(transaction.raw)
 
             yield transaction
 
@@ -1185,7 +1197,7 @@ class BanquePopulaire(TwoFactorBrowser):
             # Loans and the like are unknown to the PFM API, they have no coming.
             return
 
-        categories = self._load_categories()
+        categories = self._get_categories()
 
         # Scheduled operations are dated in the future and card ones in the recent
         # past, so the two lists have to be merged to stay in chronological order.
