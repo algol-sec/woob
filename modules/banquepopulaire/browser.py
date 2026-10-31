@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 from hashlib import sha256
+from itertools import chain
 from uuid import uuid4
 
 from woob.browser import URL, need_login
@@ -44,6 +45,7 @@ from woob.exceptions import (
 )
 from woob.tools.date import now_as_utc
 from woob.tools.misc import polling_loop
+from woob_modules.caissedepargne.pages import Transaction as CaisseEpargneTransaction
 from woob_modules.caissedepargne.pages import VkImagePage
 
 from .pages import (
@@ -1010,7 +1012,7 @@ class BanquePopulaire(TwoFactorBrowser):
     def data_api_headers(self):
         return {
             "Accept": "application/json, text/plain, */*",  # Mandatory, else you've got an HTML page.
-            "Authorization": "Bearer %s" % self.access_token,
+            "Authorization": f"Bearer {self.access_token}",
             "Origin": self.BASEURL,
             "Referer": f"{self.BASEURL}/",
             "Sec-Fetch-Dest": "empty",
@@ -1030,10 +1032,11 @@ class BanquePopulaire(TwoFactorBrowser):
 
     def _iter_pfm_items(self, url, params):
         """Yield every entry of a paginated PFM list, page after page."""
-        params = dict(params, skip=0, take=self.PFM_PAGE_SIZE)
+        # Work on a copy, so that the pagination does not leak into the caller's params.
+        page_params = dict(params, skip=0, take=self.PFM_PAGE_SIZE)
 
         while True:
-            url.go(params=params, method="GET", headers=self.data_api_headers)
+            url.go(params=page_params, method="GET", headers=self.data_api_headers)
             raw_json_data = self.page.get_raw_json()
             items = json.loads(raw_json_data)["data"]
 
@@ -1043,7 +1046,7 @@ class BanquePopulaire(TwoFactorBrowser):
 
             yield from items
 
-            params["skip"] += self.PFM_PAGE_SIZE
+            page_params["skip"] += self.PFM_PAGE_SIZE
 
     def _build_transaction(self, element, categories):
         transaction = Transaction()
@@ -1133,6 +1136,19 @@ class BanquePopulaire(TwoFactorBrowser):
 
             yield transaction
 
+    @staticmethod
+    def _deduce_type(element):
+        """Guess the type of a transaction from its raw label.
+
+        The labels follow the same conventions as on the other BPCE banks, so
+        reuse the patterns of the Caisse d'Épargne module.
+        """
+        raw = (element.get("parsedData") or {}).get("originalText") or element["text"]
+        for pattern, transaction_type in CaisseEpargneTransaction.PATTERNS:
+            if pattern.match(raw):
+                return transaction_type
+        return Transaction.TYPE_UNKNOWN
+
     def _iter_scheduled_transactions(self, account, categories):
         """Operations the bank already knows about but has not run yet.
 
@@ -1150,7 +1166,7 @@ class BanquePopulaire(TwoFactorBrowser):
         for element in self._iter_pfm_items(self.upcoming_transactions, params):
             transaction = self._build_transaction(element, categories)
             transaction.coming = True
-            transaction.type = Transaction.TYPE_ORDER
+            transaction.type = self._deduce_type(element)
 
             yield transaction
 
@@ -1167,17 +1183,20 @@ class BanquePopulaire(TwoFactorBrowser):
 
         if not account._contractPfmId:
             # Loans and the like are unknown to the PFM API, they have no coming.
-            return []
+            return
 
         categories = self._load_categories()
 
-        coming = list(self._iter_scheduled_transactions(account, categories))
-        coming.extend(self._iter_pending_card_transactions(account, categories))
-
         # Scheduled operations are dated in the future and card ones in the recent
         # past, so the two lists have to be merged to stay in chronological order.
-        coming.sort(key=lambda transaction: transaction.date, reverse=True)
-        return coming
+        yield from sorted(
+            chain(
+                self._iter_scheduled_transactions(account, categories),
+                self._iter_pending_card_transactions(account, categories),
+            ),
+            key=lambda transaction: transaction.date,
+            reverse=True,
+        )
 
 
 class iter_retry:
