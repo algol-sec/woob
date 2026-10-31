@@ -100,20 +100,37 @@ def https_server(tls_material: tuple[Path, Path]):
 
 
 class NoRetryBrowser(Browser):
-    MAX_RETRIES = 0  # don't want to retry when we got a SSL error
+    """No retrying on errors Browser.
+
+    Retries are unnecessary when using `https_server` fixture.
+    """
+
+    MAX_RETRIES = 0
+
+
+class BrowserVerifyTrue(NoRetryBrowser):
+    """TLS-verifying Browser."""
+
+    VERIFY = True
+
+
+class BrowserVerifyFalse(NoRetryBrowser):
+    """Non-TLS-verifying Browser."""
+
+    VERIFY = False
 
 
 class TestBrowser:
-    def test_verify_true(self, https_server):
-        """Browser verifies TLS certificate unless explicitely requested not to."""
-        url, bundle_path = https_server
-
-        # Browser with static VERIFY attribute
-        class BrowserVerifyTrue(NoRetryBrowser):
-            VERIFY = True
+    def test_browser_verify_true_fails(self, https_server):
+        """Browser verifies TLS certificate."""
+        url, _ = https_server
 
         with pytest.raises(requests.exceptions.SSLError):
             BrowserVerifyTrue().open(url)
+
+    def test_browser_verify_true_with_overrides(self, https_server):
+        """Browser TLS verification is disabled through overrides."""
+        url, _ = https_server
 
         r = BrowserVerifyTrue(verify=False).open(url)
         assert r.status_code == 200
@@ -121,24 +138,32 @@ class TestBrowser:
         r = BrowserVerifyTrue().open(url, verify=False)
         assert r.status_code == 200
 
+    def test_browser_verify_true_with_ca_bundle(self, https_server):
+        """Browser TLS verification with CA bundle."""
+        url, bundle_path = https_server
+
         r = BrowserVerifyTrue().open(url, verify=bundle_path)
         assert r.status_code == 200
 
-    def test_verify_false(self, https_server):
-        """Browser does not verify TLS certificate unless explicitly requested."""
+    def test_browser_verify_false_succeeds(self, https_server):
+        """Browser does not verify TLS certificate."""
         url, _ = https_server
-
-        class BrowserVerifyFalse(NoRetryBrowser):
-            VERIFY = False
-
-        with pytest.raises(requests.exceptions.SSLError):
-            BrowserVerifyFalse().open(url, verify=True)
 
         r = BrowserVerifyFalse().open(url)
         assert r.status_code == 200
 
-    def test_verify_bundle(self, https_server):
-        """Browser trusts VERIFY provided bundle."""
+    def test_browser_verify_false_with_overrides(self, https_server):
+        """Browser TLS verification is enabled through overrides."""
+        url, _ = https_server
+
+        with pytest.raises(requests.exceptions.SSLError):
+            BrowserVerifyFalse(verify=True).open(url)
+
+        with pytest.raises(requests.exceptions.SSLError):
+            BrowserVerifyFalse().open(url, verify=True)
+
+    def test_verify_path(self, https_server):
+        """Browser trusts VERIFY provided CA bundle."""
         url, bundle_path = https_server
 
         class BrowserVerifyPath(NoRetryBrowser):
