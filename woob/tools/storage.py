@@ -18,9 +18,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
-
-from typing_extensions import Unpack
+from typing import Any, Unpack
 
 from .config.iconfig import GetArgs, IConfigGet, SetArgs
 from .config.yamlconfig import YamlConfig
@@ -39,19 +37,19 @@ class IStorage:
         """
         raise NotImplementedError()
 
-    def set(self, what: str, name: str, *args: Unpack[SetArgs]) -> None:
+    def set(self, what: str, name: str, *args: *SetArgs) -> None:
         """
         Set data in a path.
         """
         raise NotImplementedError()
 
-    def delete(self, what: str, name: str, *args: Unpack[GetArgs]) -> None:
+    def delete(self, what: str, name: str, *args: *GetArgs) -> None:
         """
         Delete a value or a path.
         """
         raise NotImplementedError()
 
-    def get(self, what: str, name: str, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, what: str, name: str, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         """
         Get a value or a path.
         """
@@ -76,11 +74,11 @@ class StandardStorage(IStorage):
     def save(self, what: str, name: str) -> None:
         self.config.save()
 
-    def set(self, what: str, name: str, *args: Unpack[SetArgs]) -> None:
+    def set(self, what: str, name: str, *args: *SetArgs) -> None:
         self.config.set(what, name, *args)
 
-    def delete(self, what: str, name: str, *args: Unpack[GetArgs]) -> None:
+    def delete(self, what: str, name: str, *args: *GetArgs) -> None:
         self.config.delete(what, name, *args)
 
-    def get(self, what: str, name: str, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, what: str, name: str, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         return self.config.get(what, name, *args, **kwargs)

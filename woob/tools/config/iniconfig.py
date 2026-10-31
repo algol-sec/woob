@@ -20,9 +20,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from configparser import DEFAULTSECT, RawConfigParser
 from decimal import Decimal
-from typing import Any
-
-from typing_extensions import Unpack
+from typing import Any, Unpack
 
 from .iconfig import GetArgs, IConfig, IConfigGet, SetArgs
 from .util import LOGGER
@@ -86,7 +84,7 @@ class INIConfig(IConfig):
         with open(self.path, "w", encoding="utf-8") as f:
             self.config.write(f)
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         default = None
         if "default" in kwargs:
             default = kwargs["default"]
@@ -103,7 +101,7 @@ class INIConfig(IConfig):
         except KeyError:
             return default
 
-    def set(self, *args: Unpack[SetArgs]) -> None:
+    def set(self, *args: *SetArgs) -> None:
         v = self.values
         # mypy complains that args[:-2] might be [] and is ambiguous. It is expected.
         for k in args[:-2]:  # type: ignore[misc]
@@ -112,7 +110,7 @@ class INIConfig(IConfig):
             v = v[k]
         v[args[-2]] = args[-1]
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         v = self.values
         # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
         for k in args[:-1]:  # type: ignore[misc]

@@ -27,9 +27,8 @@ from typing import (
     Generic,
     TypedDict,
     TypeVar,
+    Unpack,
 )
-
-from typing_extensions import Unpack
 
 from .misc import to_unicode
 

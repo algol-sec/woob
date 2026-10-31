@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import dbm.ndbm
 from collections.abc import Mapping, MutableMapping
-from typing import Any, cast
+from typing import Any, Unpack, cast
 
 import yaml
-from typing_extensions import Unpack
 
 from .iconfig import ConfigError, GetArgs, IConfig, IConfigGet, SetArgs
 from .yamlconfig import WoobDumper
@@ -53,7 +52,7 @@ class DBMConfig(IConfig):
         if self.storage and hasattr(self.storage, "sync"):
             self.storage.sync()
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         key = ".".join(args)
         try:
             value = self.storage[key]
@@ -68,7 +67,7 @@ class DBMConfig(IConfig):
             raise ConfigError() from exc
         return value
 
-    def set(self, *args: Unpack[SetArgs]) -> None:
+    def set(self, *args: *SetArgs) -> None:
         key = ".".join(args[:-1])
         value = args[-1]
         try:
@@ -78,7 +77,7 @@ class DBMConfig(IConfig):
         except TypeError as exc:
             raise ConfigError() from exc
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         key = ".".join(args)
         try:
             del self.storage[key]

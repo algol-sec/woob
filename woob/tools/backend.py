@@ -25,11 +25,10 @@ import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from copy import copy
 from threading import RLock
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, Unpack
 from urllib.request import getproxies
 
 from packaging.version import Version
-from typing_extensions import Unpack
 
 from woob import __version__
 from woob.capabilities.base import BaseObject, Capability, FieldNotFound, NotAvailable, NotLoaded
@@ -65,7 +64,7 @@ class BackendStorage:
         self.name = name
         self.storage = storage
 
-    def set(self, *args: Unpack[SetArgs]) -> None:
+    def set(self, *args: *SetArgs) -> None:
         """
         Set value in the storage.
 
@@ -81,7 +80,7 @@ class BackendStorage:
         if self.storage:
             self.storage.set("backends", self.name, *args)
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         """
         Delete a value from the storage.
 
@@ -90,7 +89,7 @@ class BackendStorage:
         if self.storage:
             self.storage.delete("backends", self.name, *args)
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         """
         Get a value or a dict of values in storage.
 

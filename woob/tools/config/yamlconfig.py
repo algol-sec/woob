@@ -19,10 +19,9 @@
 import os
 import tempfile
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Unpack
 
 import yaml
-from typing_extensions import Unpack
 
 import woob.tools.date
 
@@ -91,7 +90,7 @@ class YamlConfig(IConfig):
         replace(f.name, self.path)
         LOGGER.debug("Configuration file saved: %s." % self.path)
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         v = self.values
         # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
         for a in args[:-1]:  # type: ignore[misc]
@@ -112,7 +111,7 @@ class YamlConfig(IConfig):
 
         return ret
 
-    def set(self, *args: Unpack[SetArgs]) -> None:
+    def set(self, *args: *SetArgs) -> None:
         v = self.values
         # mypy complains that args[:-2] might be [] and is ambiguous. It is expected.
         for a in args[:-2]:  # type: ignore[misc]
@@ -126,7 +125,7 @@ class YamlConfig(IConfig):
 
         v[args[-2]] = args[-1]
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         v = self.values
         # mypy complains that args[:-1] might be [] and is ambiguous. It is expected.
         for a in args[:-1]:  # type: ignore[misc]

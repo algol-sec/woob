@@ -23,10 +23,9 @@ import tempfile
 import types
 from collections.abc import ItemsView, Iterator, Mapping, MutableMapping
 from logging import Logger
-from typing import Any, cast
+from typing import Any, Unpack, cast
 
 import yaml
-from typing_extensions import Unpack
 
 from .iconfig import ConfigError, ConfigKeyPath, GetArgs, IConfig, IConfigGet
 from .util import replace, time_buffer
@@ -211,7 +210,7 @@ class SQLiteConfig(IConfig):
         cur.execute("SELECT count(*) FROM %s;" % quote(table))  # nosec
         return cast(int, cur.fetchone()[0])
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         table = args[0]
         key = ".".join(args[1:])
         self.ensure_table(table)
@@ -233,7 +232,7 @@ class SQLiteConfig(IConfig):
             raise ConfigError()
         return value
 
-    def set(self, *args: Unpack[SetArgs]) -> None:  # type: ignore[override]
+    def set(self, *args: *SetArgs) -> None:  # type: ignore[override]
         table = args[0]
         key = ".".join(args[1:-1])
         if not key:
@@ -249,7 +248,7 @@ class SQLiteConfig(IConfig):
         except TypeError:
             raise ConfigError()
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         table = args[0]
         key = ".".join(args[1:])
         if not key:
@@ -265,7 +264,7 @@ class SQLiteConfig(IConfig):
             if not cur.rowcount:
                 raise ConfigError()
 
-    def has(self, *args: Unpack[GetArgs]) -> bool:
+    def has(self, *args: *GetArgs) -> bool:
         table = args[0]
         key = ".".join(args[1:])
         if not key:

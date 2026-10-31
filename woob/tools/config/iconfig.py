@@ -19,9 +19,7 @@ from __future__ import annotations
 
 import types
 from collections.abc import Mapping
-from typing import Any, TypedDict
-
-from typing_extensions import Unpack
+from typing import Any, TypedDict, Unpack
 
 
 class ConfigError(Exception):
@@ -57,7 +55,7 @@ class IConfig:
         """Save config."""
         raise NotImplementedError()
 
-    def get(self, *args: Unpack[GetArgs], **kwargs: Unpack[IConfigGet]) -> Any:
+    def get(self, *args: *GetArgs, **kwargs: Unpack[IConfigGet]) -> Any:
         """
         Get the value of an option.
 
@@ -66,7 +64,7 @@ class IConfig:
         """
         raise NotImplementedError()
 
-    def set(self, *args: Unpack[SetArgs]) -> None:
+    def set(self, *args: *SetArgs) -> None:
         """
         Set a config value.
 
@@ -74,7 +72,7 @@ class IConfig:
         """
         raise NotImplementedError()
 
-    def delete(self, *args: Unpack[GetArgs]) -> None:
+    def delete(self, *args: *GetArgs) -> None:
         """
         Delete an option from config.
 
