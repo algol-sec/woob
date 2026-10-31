@@ -40,7 +40,6 @@ can access to a website the same way than a real browser.
 import hashlib
 import os
 import re
-import socket
 import ssl as basessl
 import subprocess
 import warnings
@@ -140,9 +139,9 @@ def cert_to_dict(cert):
 
 
 ERROR_MAP = {
-    nss.error.PR_CONNECT_TIMEOUT_ERROR: (socket.timeout,),
-    nss.error.PR_IO_TIMEOUT_ERROR: (socket.timeout,),
-    nss.error.PR_CONNECT_RESET_ERROR: (socket.error,),
+    nss.error.PR_CONNECT_TIMEOUT_ERROR: (TimeoutError,),
+    nss.error.PR_IO_TIMEOUT_ERROR: (TimeoutError,),
+    nss.error.PR_CONNECT_RESET_ERROR: (OSError,),
 }
 
 
@@ -389,11 +388,11 @@ def ssl_wrap_socket(sock, *args, **kwargs):
         wrapper.send(b"")  # performs handshake
     except nss.error.NSPRError as e:
         if e.error_code == nss.error.PR_END_OF_FILE_ERROR:
-            # the corresponding openssl error isn't exactly socket.timeout()
+            # the corresponding openssl error isn't exactly TimeoutError()
             # but rather something SyscallError.
             # i don't know how to generate it exactly and the end result is
             # similar so let's use this.
-            raise TimeoutError()
+            raise TimeoutError
 
         # see below why closing
         wrapper.close()
