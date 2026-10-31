@@ -364,11 +364,7 @@ def ssl_wrap_socket(sock, *args, **kwargs):
     # obtaining the same file descriptor, then NSS would use the file, thinking
     # it's a network file descriptor... dup the fd to make it independant
     fileno = sock.fileno()
-    if hasattr(sock, "detach"):
-        # socket.detach only exists in py3.
-        sock.detach()
-    else:
-        fileno = os.dup(fileno)
+    sock.detach()
 
     nsssock = nss.ssl.SSLSocket.import_tcp_socket(fileno)
     wrapper = Wrapper(nsssock)
