@@ -18,7 +18,7 @@
 # flake8: compatible
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from urllib.parse import quote_plus
 
@@ -450,19 +450,6 @@ class BankStatementPage(SGPEJsonPage):
             if reason == "oob_insc_oblig":
                 raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")
             raise AssertionError(f"Error {reason} is not handled yet")
-
-    def default_min_max_date(self):
-        ## Default dates are not provided, let's gess those
-        min_date = date.today() - timedelta(weeks=12)
-        max_date = date.today()
-        assert min_date and max_date, "There should have min date and max date to retrieve document"
-        return min_date, max_date
-
-    def get_min_max_date(self):
-        min_date = Date(Dict("donnees/criteres/dateMin"), dayfirst=True, default=None)(self.doc)
-        max_date = Date(Dict("donnees/criteres/dateMax"), dayfirst=True, default=None)(self.doc)
-        assert min_date and max_date, "There should have min date and max date to retrieve document"
-        return min_date, max_date
 
     @method
     class iter_subscription(DictElement):

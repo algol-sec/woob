@@ -18,7 +18,7 @@
 # flake8: compatible
 
 from base64 import b64encode
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import quote_plus
 
 from dateutil.relativedelta import relativedelta
@@ -322,29 +322,34 @@ class SGEnterpriseBrowser(SGPEBrowser):
 
         self.page.check_error()
 
-        # set the max/min date to use them in iter_documents
-        self.date_min, self.date_max = self.page.default_min_max_date()
-
+        assert isinstance(self.page, BankStatementPage)
         return self.page.iter_subscription(subscriber=subscriber)
 
     @need_login
     def iter_documents(self, subscription):
-        # This quality website can only fetch documents through a form, looking for dates
-        # with a range of 3 months maximum
-        search_date_max = self.date_max
-        search_date_min = self.date_min
+        """Lists documents related to `subscription`.
 
-        # As "new" woob developper, I remove the loop.
-        # FIXME : Add a 4 iterations loop, with dates 3 months older 4 times (to get full year)
+        The website only allows to lookup documents in a 3 months range.
+        List documents by iterating 3 months at a time in the past until the subscription date.
+        """
+        search_date_max = datetime.today()
+        search_date_min = (search_date_max - relativedelta(months=3)).replace(day=1)
 
-        self.subscription_search.go(
-            prestationIdTechnique=quote_plus(subscription._internal_id),
-            dateDebut=search_date_min.strftime("%d/%m/%Y"),
-            dateFin=search_date_max.strftime("%d/%m/%Y"),
-        )
-        self.page.check_error()
+        while search_date_min > subscription._subscription_date:
+            # TODO: verify logic reaches subscription date.
+            params = {
+                "prestationIdTechnique": quote_plus(subscription._internal_id),
+                "dateDebut": search_date_min.strftime("%d/%m/%Y"),
+                "dateFin": search_date_max.strftime("%d/%m/%Y"),
+            }
+            self.subscription_search.go(**params)
+            assert isinstance(self.page, BankStatementPage)
+            self.page.check_error()
 
-        yield from self.page.iter_documents()
+            yield from self.page.iter_documents()
+
+            search_date_max = search_date_min - relativedelta(day=1)
+            search_date_min = search_date_max - relativedelta(months=3)
 
 
 class SGProfessionalBrowser(SGPEBrowser):
