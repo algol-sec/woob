@@ -470,8 +470,10 @@ class BankStatementPage(SGPEJsonPage):
 
         class item(ItemElement):
             klass = Subscription
+
             obj_id = Dict("prestationId")
             obj_label = Dict("libelle")
+            obj_subscriber = Env("subscriber")
             obj_prestationIdTechnique = Dict("prestationIdTechnique")
 
     def iter_documents(self, subscription):
