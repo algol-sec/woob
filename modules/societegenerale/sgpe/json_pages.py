@@ -474,7 +474,8 @@ class BankStatementPage(SGPEJsonPage):
             obj_id = Dict("prestationId")
             obj_label = Dict("libelle")
             obj_subscriber = Env("subscriber")
-            obj_prestationIdTechnique = Dict("prestationIdTechnique")
+
+            obj__internal_id = Dict("prestationIdTechnique")
 
     def iter_documents(self):
         for relevesParDateEtAbonnements in self.doc["donnees"]["relevesParDateEtAbonnements"]:

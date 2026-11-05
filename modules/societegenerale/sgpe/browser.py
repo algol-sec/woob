@@ -338,7 +338,7 @@ class SGEnterpriseBrowser(SGPEBrowser):
         # FIXME : Add a 4 iterations loop, with dates 3 months older 4 times (to get full year)
 
         self.subscription_search.go(
-            prestationIdTechnique=quote_plus(subscribtion.prestationIdTechnique),
+            prestationIdTechnique=quote_plus(subscription._internal_id),
             dateDebut=search_date_min.strftime("%d/%m/%Y"),
             dateFin=search_date_max.strftime("%d/%m/%Y"),
         )
