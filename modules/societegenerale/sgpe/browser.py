@@ -68,6 +68,7 @@ from .pages import (
     MainPEPage,
     MarketAccountsDetailsPage,
     MarketAccountsPage,
+    PdfPage,
     UnavailablePage,
     UselessPage,
 )
@@ -285,6 +286,7 @@ class SGEnterpriseBrowser(SGPEBrowser):
         r"/icd/epe/data/list-releves-proent-authsec.json\?b64e200_prestationIdTechnique=(?P<prestationIdTechnique>.+)&dt10_dateDebut=(?P<dateDebut>.+)&dt10_dateFin=(?P<dateFin>.+)",
         BankStatementPage,
     )
+    pdf_page = URL(r"/icd/epe/pdf/releve-proent-authsec\.pdf\?b64e4000_refTechnique=(?P<ref_tech>.*)", PdfPage)
 
     # * Ent adapted URLs
     main_page = URL(r"https://entreprises.sg.fr", r"/sec/vk/gen_", MainPEPage)

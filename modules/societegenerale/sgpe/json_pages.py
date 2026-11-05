@@ -484,7 +484,7 @@ class BankStatementPage(SGPEJsonPage):
                     d.type = DocumentTypes.STATEMENT
                     d.format = "pdf"
                     d.id = "{}_{}".format(relevesParDateEtAbonnements["iban"], r["dateEdition"].replace("/", ""))
-                    d.url = "/icd/epe/pdf/releve-proent-authsec.pdf?b64e4000_refTechnique=%s" % quote_plus(r["sceau"])
+                    d.url = self.browser.pdf_page.build(ref_tech=quote_plus(r["sceau"]))
                     yield d
 
 

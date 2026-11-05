@@ -24,7 +24,7 @@ from logging import error
 from woob.browser.elements import ItemElement, SkipItem, TableElement, method
 from woob.browser.filters.html import Link, TableCell
 from woob.browser.filters.standard import Base, CleanDecimal, CleanText, Coalesce, Currency, Date, Field, Format, Regexp
-from woob.browser.pages import HTMLPage, LoggedPage
+from woob.browser.pages import HTMLPage, LoggedPage, RawPage
 from woob.capabilities.bank import Account
 from woob.capabilities.bank.wealth import Investment
 from woob.capabilities.base import NotAvailable
@@ -301,3 +301,7 @@ class MarketAccountsDetailsPage(LoggedPage, HTMLPage):
                 date = re.sub("( à .+)", "", date)
                 date = Date(dayfirst=True).filter(date)
                 return date
+
+
+class PdfPage(LoggedPage, SGPEPage, RawPage):
+    pass
