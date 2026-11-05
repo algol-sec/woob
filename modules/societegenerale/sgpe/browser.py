@@ -328,7 +328,7 @@ class SGEnterpriseBrowser(SGPEBrowser):
         return self.page.iter_subscription(subscriber=subscriber)
 
     @need_login
-    def iter_documents(self, subscribtion):
+    def iter_documents(self, subscription):
         # This quality website can only fetch documents through a form, looking for dates
         # with a range of 3 months maximum
         search_date_max = self.date_max
@@ -344,7 +344,7 @@ class SGEnterpriseBrowser(SGPEBrowser):
         )
         self.page.check_error()
 
-        yield from self.page.iter_documents(subscribtion)
+        yield from self.page.iter_documents()
 
 
 class SGProfessionalBrowser(SGPEBrowser):

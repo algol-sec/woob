@@ -476,7 +476,7 @@ class BankStatementPage(SGPEJsonPage):
             obj_subscriber = Env("subscriber")
             obj_prestationIdTechnique = Dict("prestationIdTechnique")
 
-    def iter_documents(self, subscription):
+    def iter_documents(self):
         for relevesParDateEtAbonnements in self.doc["donnees"]["relevesParDateEtAbonnements"]:
             for releveParDate in relevesParDateEtAbonnements["relevesParDate"]:
                 for r in releveParDate["releves"]:
