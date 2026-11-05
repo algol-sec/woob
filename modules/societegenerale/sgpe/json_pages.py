@@ -28,7 +28,7 @@ from woob.browser.elements import DictElement, ItemElement, method
 from woob.browser.filters.json import Dict
 from woob.browser.filters.standard import BrowserURL, CleanDecimal, CleanText, Coalesce
 from woob.browser.filters.standard import Currency as CurrencyFilter
-from woob.browser.filters.standard import Date, Env, Eval, Field, Format, MapIn, Regexp
+from woob.browser.filters.standard import Date, Env, Eval, Field, Format, FromTimestamp, MapIn, Regexp
 from woob.browser.pages import JsonPage, pagination
 from woob.capabilities import NotAvailable
 from woob.capabilities.bank import Account, AccountOwnerType, NoAccountsException
@@ -476,6 +476,7 @@ class BankStatementPage(SGPEJsonPage):
             obj_subscriber = Env("subscriber")
 
             obj__internal_id = Dict("prestationIdTechnique")
+            obj__subscription_date = Date(FromTimestamp(Dict("dateOuverture"), millis=True))
 
     def iter_documents(self):
         for relevesParDateEtAbonnements in self.doc["donnees"]["relevesParDateEtAbonnements"]:
