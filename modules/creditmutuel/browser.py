@@ -1003,10 +1003,18 @@ class CreditMutuelBrowser(TwoFactorBrowser):
             try:
                 for page in range(1, 50):
                     # Need to reach the page with all transactions
+                    if not self.page:
+                        self.logger.warning("Unknown page after loading more transactions: %s", self.url)
+                        break
                     if not self.page.has_more_operations():
                         break
-                    form = self.page.get_form(xpath='//form[contains(@action, "_pid=AccountMasterDetail")]')
-                    form["_FID_DoLoadMoreTransactions"] = ""
+                    # The form has several submit buttons (e.g. "_FID_DoGoToOnboarding"),
+                    # select the "load more" one by its action name prefix, as its name
+                    # may carry a suffix such as "_displayCheckBox:false".
+                    form = self.page.get_form(
+                        xpath='//form[contains(@action, "_pid=AccountMasterDetail")]',
+                        submit='.//input[@type="submit"][starts-with(@name, "_FID_DoLoadMoreTransactions")]',
+                    )
                     form["_wxf2_pseq"] = page
                     form.submit()
             # IndexError when form xpath returns [], StopIteration if next called on empty iterable
