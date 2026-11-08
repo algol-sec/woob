@@ -113,7 +113,7 @@ class BouyguesBrowser(TwoFactorBrowser):
         authorization = "Bearer " + self.access_token
         self.session.headers["Authorization"] = authorization
 
-    def build_oauth_param(self, redirect_uri, tmpl=True, client_id="ec.nav.bouyguestelecom.fr"):
+    def build_oauth_param(self, redirect_uri, tmpl=True, client_id="a360.bouyguestelecom.fr"):
         params = {
             "redirect_uri": redirect_uri,
             "client_id": client_id,
@@ -122,7 +122,7 @@ class BouyguesBrowser(TwoFactorBrowser):
             "response_type": "id_token token",
         }
         if tmpl is True:
-            params["tmpl"] = "bytelConnect"
+            params["tmpl"] = "sasUnique"
         return params
 
     def login_with_session_data(self):
