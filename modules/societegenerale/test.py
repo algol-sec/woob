@@ -16,17 +16,26 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import json
+import operator
+from datetime import timedelta
+from functools import partial
 from unittest.mock import Mock
 
 import factory
 import pytest
 
 from woob.capabilities import NotLoaded
+from woob.capabilities.bank import Account
 from woob.capabilities.profile import Person
+from woob.core import Woob
+from woob.tools.backend import Module
+from woob.tools.date import now_as_utc
 from woob.tools.test import BackendTest
 
 from .browser import SocieteGenerale
 from .pages.accounts_list import ContactDetailsPage
+from .sgpe.browser import SGProfessionalBrowser
+from .sgpe.json_pages import BankStatementPage
 
 
 class JSONFactory(factory.base.DictFactory):
@@ -95,6 +104,84 @@ class ConsultationAuthsecFactory(JSONFactory):
     caract = {}
 
 
+class GetAllAbonnementsProentAuthsec(JSONFactory):
+    """Generates /icd/epe/data/get-all-abonnements-proent-authsec.json payload."""
+
+    commun = factory.SubFactory(SGStatusFactory, origine="epe")
+    donnees = factory.Dict(
+        {
+            "abonnementsDto": factory.List(
+                [
+                    factory.Dict(
+                        {
+                            "prestationId": "30003000000000000001234567891234",
+                            "libelle": "Compte Bancaire",
+                            "prestationIdTechnique": "xyz=",
+                            "dateOuverture": factory.Transformer(
+                                factory.Faker("unix_time"),
+                                transform=partial(operator.mul, 1000),
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
+    caract = {}
+
+
+class ListRelevesProentAuthsec(JSONFactory):
+    """Generates /icd/epe/data/list-releves-proent-authsec.json payload."""
+
+    commun = factory.SubFactory(SGStatusFactory, origine="epe")
+    donnees = factory.Dict(
+        {
+            "relevesParDateEtAbonnements": factory.List(
+                [
+                    factory.Dict(
+                        {
+                            "prestationIdTechnique": "xyz=",
+                            "libelle": factory.Faker("bothify", text="Relevé de compte ????"),
+                            "iban": factory.Faker("iban"),
+                            "agenceGestionnaire": "",
+                            "relevesParDate": factory.List(
+                                [
+                                    factory.Dict(
+                                        {
+                                            "dateReleves": factory.Faker("date", pattern="%d/%m/%Y"),
+                                            "releves": factory.List(
+                                                [
+                                                    factory.Dict(
+                                                        {
+                                                            "dateEdition": factory.Faker("date", pattern="%d/%m/%Y"),
+                                                            "nombrePages": 0,
+                                                            "isVolumineux": False,
+                                                            "sceau": factory.Faker("lexify", text="????????"),
+                                                            "identifiant": factory.Faker("uuid4"),
+                                                        }
+                                                    )
+                                                ]
+                                            ),
+                                        }
+                                    )
+                                ]
+                            ),
+                        }
+                    )
+                ]
+            )
+        }
+    )
+    caract = {}
+
+
+@pytest.fixture(scope="session")
+def sg_backend() -> Module:
+    woob = Woob()
+    woob.load_backends(modules=["societegenerale"])
+    return woob.build_backend("societegenerale")
+
+
 @pytest.fixture
 def sg_par_browser(faker) -> SocieteGenerale:
     config = {
@@ -103,6 +190,11 @@ def sg_par_browser(faker) -> SocieteGenerale:
         "website": "par",
     }
     return SocieteGenerale(config, config["login"], config["password"])
+
+
+@pytest.fixture
+def sg_pro_browser(sg_backend) -> SGProfessionalBrowser:
+    return SGProfessionalBrowser({"login": "123", "password": "456789", "website": "pro"}, "123", "456789")
 
 
 # Unittests
@@ -121,6 +213,58 @@ def test_load_address(sg_par_browser, payload):
     page.fill_profile(profile)
     assert profile.postal_address is not None
     assert profile.address is NotLoaded
+
+
+@pytest.mark.parametrize("payload", [GetAllAbonnementsProentAuthsec()])
+def test_pro_list_subscriptions(sg_pro_browser, payload):
+    """List subscriptions on professional website."""
+    page = BankStatementPage(sg_pro_browser, Mock("response", url="", text=payload))
+    page.params = {"subscriber": "John Doe"}
+
+    subscriptions = list(page.iter_subscription())
+    assert len(subscriptions) == 1
+
+
+def test_pro_iter_documents(sg_pro_browser):
+    """Iterate over documents on professional website from subscription date."""
+
+    def mock_go(browser, payloads):
+        payload_it = iter(payloads)
+
+        def go(**kwargs):
+            browser.page = BankStatementPage(browser, Mock("response", url="", text=next(payload_it)))
+
+        return go
+
+    account = Account("xyz=")
+    account._internal_id = "xyz="
+    account._subscription_date = (now_as_utc() - timedelta(days=6 * 30)).date()
+
+    # Successive calls payloads
+    payloads = [
+        ListRelevesProentAuthsec(
+            donnees__relevesParDateEtAbonnements__0__relevesParDate__0__dateReleves=(
+                now_as_utc() - timedelta(days=1)
+            ).strftime("%d/%m/%Y"),
+        ),
+        ListRelevesProentAuthsec(
+            donnees__relevesParDateEtAbonnements__0__relevesParDate__0__dateReleves=(
+                now_as_utc() - timedelta(days=95)
+            ).strftime("%d/%m/%Y"),
+        ),
+        ListRelevesProentAuthsec(
+            donnees__relevesParDateEtAbonnements__0__relevesParDate__0__dateReleves=(
+                account._subscription_date
+            ).strftime("%d/%m/%Y"),
+        ),
+    ]
+    sg_pro_browser.logged = True
+    sg_pro_browser.documents.go = mock_go(sg_pro_browser, payloads)
+    documents = list(sg_pro_browser.iter_documents(account))
+
+    assert len(documents) == 3
+    assert documents[0].date.date() == (now_as_utc() - timedelta(days=1)).date()
+    assert documents[2].date.date() == account._subscription_date
 
 
 # Integration tests
