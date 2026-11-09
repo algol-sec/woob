@@ -1571,7 +1571,7 @@ class ContactDetailsPage(JsonBasePage):
                 adrs.append(num)
 
             location.street = ", ".join(adrs)
-            location.postal_code = CleanText(Dict("donnees/adresse/codePostal", default=NotAvailable))(self.doc)
+            location.postal_code = Dict("donnees/adresse/codePostal", default=NotAvailable)(self.doc)
             location.city = MultiJoin(
                 CleanText(Dict("donnees/adresse/serviceDistribution"), default=NotAvailable),
                 CleanText(Dict("donnees/adresse/ville"), default=NotAvailable),
