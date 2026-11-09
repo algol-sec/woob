@@ -1086,7 +1086,7 @@ class BanquePopulaire(TwoFactorBrowser):
 
     @retry(LoggedOut)
     @need_login
-    def iter_history(self, account: BanquePopulaireAccount, coming=False):
+    def iter_history(self, account: BanquePopulaireAccount):
         self.updateBearerForDataConsumptionIfNeeded()
 
         categories = self._get_categories()
