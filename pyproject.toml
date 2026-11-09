@@ -79,6 +79,8 @@ dev = [
     "tox>=4.21",
     "virtualenv",
     "xunitparser>=1.3.4",
+    "factory_boy",
+    "faker",
 ]
 docs = [
     "cloudscraper",
