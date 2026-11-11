@@ -46,11 +46,8 @@ class YomoniModule(Module, CapBankWealth):
     def iter_accounts(self):
         return self.browser.iter_accounts()
 
-    def iter_history(self, account):
-        return self.browser.iter_history(account)
-
-    def iter_coming(self, account):
-        return self.browser.iter_coming(account)
+    def iter_transactions(self, account, *, with_history=True, with_coming=True):
+        return self.browser.iter_transactions(account, with_history=with_history, with_coming=with_coming)
 
     def iter_investment(self, account):
         return self.browser.iter_investment(account)

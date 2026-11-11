@@ -16,10 +16,12 @@
 # along with this woob module. If not, see <http://www.gnu.org/licenses/>.
 
 import base64
+import contextlib
 import json
 import re
 from decimal import Decimal
 from functools import wraps
+from operator import attrgetter, itemgetter
 from urllib.parse import urljoin
 
 from woob.browser.browsers import APIBrowser
@@ -87,6 +89,12 @@ class YomoniBrowser(APIBrowser):
         self.histories = {}
 
     def build_request(self, *args, **kwargs):
+        """
+        Build a JSON request, keeping the Content-Type given by the caller.
+
+        The Yomoni API takes application/json, which APIBrowser always sets,
+        but AWS Cognito requires application/x-amz-json-1.1 for the login.
+        """
         headers = kwargs.get("headers") or {}
         content_type = headers.pop("Content-Type", None)
         request = super().build_request(*args, **kwargs)
@@ -101,30 +109,34 @@ class YomoniBrowser(APIBrowser):
         The front-end embeds the configuration of each environment, we look
         for the "aws" settings of the one whose frontUrl is my.yomoni.fr.
         """
-        try:
+        with contextlib.suppress(HTTPNotFound):
             index = self.open(self.FRONT_URL).text
             scripts = re.findall(r'<script[^>]+src="(/_expo/static/js/web/[^"]+\.js)"', index)
             # The configuration lives in the main bundle, look at it first
-            scripts.sort(key=lambda src: not src.split("/")[-1].startswith("index-"))
+            scripts.sort(key=lambda src: not src.rsplit("/", 1)[1].startswith("index-"))
             for src in scripts:
-                match = re.search(
+                if match := re.search(
                     r"""frontUrl:\s*['"]https://my\.yomoni\.fr['"][^}]*?"""
                     r"""aws:\s*\{\s*userPoolId:\s*['"]([^'"]+)['"],\s*userPoolWebClientId:\s*['"]([^'"]+)['"]""",
                     self.open(urljoin(self.FRONT_URL, src)).text,
-                )
-                if match:
+                ):
                     return match.groups()
-        except HTTPNotFound:
-            pass
         self.logger.warning("Could not find the Cognito configuration in the Yomoni front-end, using known values")
         return self.COGNITO_USER_POOL_ID, self.COGNITO_CLIENT_ID
 
     def do_login(self):
+        """
+        Log in with AWS Cognito, as the my.yomoni.fr front-end does.
+
+        Cognito returns a JWT (IdToken), sent as a Bearer token to the Yomoni
+        API. The Yomoni user id, needed in some API paths, is read from the
+        "custom:yomoni_id" claim of that token.
+        """
         user_pool_id, client_id = self.get_cognito_config()
         region = user_pool_id.split("_")[0]
         try:
             response = self.request(
-                "https://cognito-idp.%s.amazonaws.com/" % region,
+                f"https://cognito-idp.{region}.amazonaws.com/",
                 data={
                     "AuthFlow": "USER_PASSWORD_AUTH",
                     "ClientId": client_id,
@@ -147,19 +159,28 @@ class YomoniBrowser(APIBrowser):
         if "AuthenticationResult" not in response:
             raise ActionNeeded(
                 locale="fr-FR",
-                message="Une authentification supplémentaire est requise sur le site Yomoni (%s)."
-                % response.get("ChallengeName"),
+                message=(
+                    "Une authentification supplémentaire est requise sur le site Yomoni "
+                    f"({response.get('ChallengeName')})."
+                ),
             )
 
         id_token = response["AuthenticationResult"]["IdToken"]
-        self.session.headers["Authorization"] = "Bearer %s" % id_token
+        self.session.headers["Authorization"] = f"Bearer {id_token}"
 
+        # The token is not verified, we only need to read its payload
         payload = id_token.split(".")[1]
         payload = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         self.user_id = payload["custom:yomoni_id"]
 
     @need_login
     def iter_accounts(self):
+        """
+        Iterate over accounts, one per compartment of each contract.
+
+        A contract (life insurance, PER...) can be split into several
+        compartments, each with its own balance, investments and transactions.
+        """
         if self.accounts:
             yield from self.accounts
             return
@@ -174,8 +195,8 @@ class YomoniBrowser(APIBrowser):
                 continue
 
             compartments = sorted(
-                self.request("v2/contracts/%s/compartments" % contract["id"]),
-                key=lambda compartment: compartment["createDate"],
+                self.request(f"v2/contracts/{contract['id']}/compartments"),
+                key=itemgetter("createDate"),
             )
             for index, compartment in enumerate(compartments):
                 account = self.build_account(contract, compartment, index, len(compartments) > 1)
@@ -189,6 +210,12 @@ class YomoniBrowser(APIBrowser):
             )
 
     def build_account(self, contract, compartment, index, several):
+        """
+        Build the account of a compartment.
+
+        :param index: position of the compartment in the contract, oldest first
+        :param several: whether the contract has more than one compartment
+        """
         number = contract["contract"]["numero"]
         contract_label = " ".join(contract["typeContract"].split("_"))
 
@@ -197,12 +224,12 @@ class YomoniBrowser(APIBrowser):
         # consistent with the ids used before compartments existed.
         a.id = "".join(number.split())
         if index:
-            a.id = "{}-{}".format(a.id, compartment["id"][:8])
+            a.id = f"{a.id}-{compartment['id'][:8]}"
         a.number = number
         a.label = contract_label
         if several:
             # Compartment name first, as account labels are often truncated
-            a.label = "{} - {}".format(compartment["name"], contract_label)
+            a.label = f"{compartment['name']} - {contract_label}"
         a.type = MapIn(self, self.ACCOUNT_TYPES, Account.TYPE_UNKNOWN).filter(contract_label.lower())
         a.opening_date = Date(default=NotAvailable).filter(
             contract["openingDate"] if not index else compartment["createDate"][:10]
@@ -270,12 +297,16 @@ class YomoniBrowser(APIBrowser):
         return i
 
     @need_login
-    def iter_history(self, account):
+    def iter_transactions(self, account, with_history=True, with_coming=True):
+        """
+        Iterate over the movements of a compartment, booked and coming ones
+        are returned by the same endpoint.
+        """
         if account.id not in self.histories:
             histories = []
             movements = self.request(
-                "users/%s/patrimoine/enveloppes/%s/compartiments/%s/mouvements"
-                % (self.user_id, account._contract_id, account._compartment_id)
+                f"users/{self.user_id}/patrimoine/enveloppes/{account._contract_id}"
+                f"/compartiments/{account._compartment_id}/mouvements"
             )
             for movement in movements:
                 if movement["type"] in self.IGNORED_TRANSACTION_TYPES:
@@ -286,13 +317,8 @@ class YomoniBrowser(APIBrowser):
                 t.date = t.rdate = Date().filter(movement["dateEffet"])
                 t.type = self.TRANSACTION_TYPES.get(movement["type"], Transaction.TYPE_BANK)
                 t.amount = round(Decimal(str(movement["montantEuros"])), 2)
-                t._coming = movement["statut"] != "TRAITE"
+                t.coming = movement["statut"] != "TRAITE"
                 histories.append(t)
 
-            self.histories[account.id] = sorted(histories, key=lambda t: t.date, reverse=True)
-        return [t for t in self.histories[account.id] if not t._coming]
-
-    @need_login
-    def iter_coming(self, account):
-        self.iter_history(account)
-        return [t for t in self.histories[account.id] if t._coming]
+            self.histories[account.id] = sorted(histories, key=attrgetter("date"), reverse=True)
+        return [t for t in self.histories[account.id] if (with_coming if t.coming else with_history)]
