@@ -136,6 +136,14 @@ class SGPEBrowser(SocieteGeneraleLogin):
     )
     inscription_page = URL("/icd-web/gax/gax-inscription-utilisateur.html", InscriptionPage)
 
+    # Bill
+    subscriptions = URL(r"/icd/epe/data/get-all-abonnements-proent-authsec.json", BankStatementPage)
+    documents = URL(
+        r"/icd/epe/data/list-releves-proent-authsec.json\?b64e200_prestationIdTechnique=(?P<prestationIdTechnique>.+)&dt10_dateDebut=(?P<dateDebut>.+)&dt10_dateFin=(?P<dateFin>.+)",
+        BankStatementPage,
+    )
+    pdf_page = URL(r"/icd/epe/pdf/releve-proent-authsec\.pdf\?b64e4000_refTechnique=(?P<ref_tech>.*)", PdfPage)
+
     @need_login
     def get_accounts_list(self):
         # 'Comptes' are standard accounts on sgpe website
@@ -269,54 +277,11 @@ class SGPEBrowser(SocieteGeneraleLogin):
             raise AssertionError("Error %s is not handled yet" % reason)
         return self.page.get_profile()
 
-
-class SGEnterpriseBrowser(SGPEBrowser):
-    BASEURL = "https://entreprises.sg.fr"
-    MENUID = "BANREL"
-    CERTHASH = "2231d5ddb97d2950d5e6fc4d986c23be4cd231c31ad530942343a8fdcc44bb99"
-    HAS_CREDENTIALS_ONLY = False  # systematic 2FA on Ent
-
-    # * Ent specific URLs
-
-    unavailable = URL(r"/page-indisponible", UnavailablePage)
-
-    # Bill
-    subscription = URL(r"/icd/epe/data/get-all-abonnements-proent-authsec.json", BankStatementPage)
-    subscription_search = URL(
-        r"/icd/epe/data/list-releves-proent-authsec.json\?b64e200_prestationIdTechnique=(?P<prestationIdTechnique>.+)&dt10_dateDebut=(?P<dateDebut>.+)&dt10_dateFin=(?P<dateFin>.+)",
-        BankStatementPage,
-    )
-    pdf_page = URL(r"/icd/epe/pdf/releve-proent-authsec\.pdf\?b64e4000_refTechnique=(?P<ref_tech>.*)", PdfPage)
-
-    # * Ent adapted URLs
-    main_page = URL(r"https://entreprises.sg.fr", r"/sec/vk/gen_", MainPEPage)
-
-    def load_state(self, state):
-        if not self.is_interactive:
-            # user not present: start up at login to raise NeedInteractiveFor2FA since 2FA is systematic
-            state.pop("url", None)
-        super().load_state(state)
-
-    @need_login
-    def iter_market_accounts(self):
-        self.accounts_main_page.go()
-        # retrieve market accounts if exist
-        market_accounts_link = self.page.get_market_accounts_link()
-
-        # there are no examples of entreprise space with market accounts yet
-        assert not market_accounts_link, "There are market accounts, retrieve them."
-        return []
-
-    @need_login
-    def iter_investment(self, account):
-        # there are no examples of entreprise space with market accounts yet
-        return []
-
     @need_login
     def iter_subscription(self):
         subscriber = self.get_profile().name
 
-        self.subscription.go()
+        self.subscriptions.go()
         if self.page.is_document_disabled():
             return []
 
@@ -342,7 +307,7 @@ class SGEnterpriseBrowser(SGPEBrowser):
                 "dateDebut": search_date_min.strftime("%d/%m/%Y"),
                 "dateFin": search_date_max.strftime("%d/%m/%Y"),
             }
-            self.subscription_search.go(**params)
+            self.documents.go(**params)
             assert isinstance(self.page, BankStatementPage)
             self.page.check_error()
 
@@ -350,6 +315,40 @@ class SGEnterpriseBrowser(SGPEBrowser):
 
             search_date_max = search_date_min - relativedelta(day=1)
             search_date_min = search_date_max - relativedelta(months=3)
+
+
+class SGEnterpriseBrowser(SGPEBrowser):
+    BASEURL = "https://entreprises.sg.fr"
+    MENUID = "BANREL"
+    CERTHASH = "2231d5ddb97d2950d5e6fc4d986c23be4cd231c31ad530942343a8fdcc44bb99"
+    HAS_CREDENTIALS_ONLY = False  # systematic 2FA on Ent
+
+    # * Ent specific URLs
+    unavailable = URL(r"/page-indisponible", UnavailablePage)
+
+    # * Ent adapted URLs
+    main_page = URL(r"https://entreprises.sg.fr", r"/sec/vk/gen_", MainPEPage)
+
+    def load_state(self, state):
+        if not self.is_interactive:
+            # user not present: start up at login to raise NeedInteractiveFor2FA since 2FA is systematic
+            state.pop("url", None)
+        super().load_state(state)
+
+    @need_login
+    def iter_market_accounts(self):
+        self.accounts_main_page.go()
+        # retrieve market accounts if exist
+        market_accounts_link = self.page.get_market_accounts_link()
+
+        # there are no examples of entreprise space with market accounts yet
+        assert not market_accounts_link, "There are market accounts, retrieve them."
+        return []
+
+    @need_login
+    def iter_investment(self, account):
+        # there are no examples of entreprise space with market accounts yet
+        return []
 
 
 class SGProfessionalBrowser(SGPEBrowser):
@@ -380,10 +379,6 @@ class SGProfessionalBrowser(SGPEBrowser):
     )
     confirm_new_recipient = URL(r"/ord-web/ord//ord-creer-destinataire.json", ConfirmRecipientPage)
 
-    # Bill
-    bank_statement_menu = URL(r"/icd/syd-front/data/syd-rce-accederDepuisMenu.json", BankStatementPage)
-    bank_statement_search = URL(r"/icd/syd-front/data/syd-rce-lancerRecherche.json", BankStatementPage)
-
     # Wealth
     market_accounts = URL(r"/brs/cct/comti10.html", MarketAccountsPage)
     market_accounts_details = URL(r"/brs/cct/comti20.html", MarketAccountsDetailsPage)
@@ -408,9 +403,6 @@ class SGProfessionalBrowser(SGPEBrowser):
 
     # * Pro adapted URLs
     main_page = URL(r"https://professionnels.sg.fr", r"/sec/vk/gen_", MainPEPage)
-
-    date_max = None
-    date_min = None
 
     new_rcpt_token = None
     new_rcpt_validate_form = None
@@ -721,55 +713,6 @@ class SGProfessionalBrowser(SGPEBrowser):
         self.accounts.go()
         self.page.check_error()
         return transfer
-
-    @need_login
-    def iter_subscription(self):
-        profile = self.get_profile()
-        subscriber = profile.name
-
-        self.bank_statement_menu.go()
-        if self.page.is_document_disabled():
-            return []
-
-        self.page.check_error()
-
-        self.date_min, self.date_max = self.page.get_min_max_date()
-        return self.page.iter_subscription(subscriber=subscriber)
-
-    @need_login
-    def iter_documents(self, subscribtion):
-        # This quality website can only fetch documents through a form, looking for dates
-        # with a range of 3 months maximum
-        search_date_max = self.date_max
-        search_date_min = None
-        is_end = False
-
-        # to avoid infinite loop
-        counter = 0
-
-        while not is_end and counter < 50:
-            # search for every 2 months
-            search_date_min = search_date_max - relativedelta(months=2)
-
-            if search_date_min < self.date_min:
-                search_date_min = self.date_min
-                is_end = True
-
-            if search_date_max <= self.date_min:
-                break
-
-            data = {
-                "dt10_dateDebut": search_date_min.strftime("%d/%m/%Y"),
-                "dt10_dateFin": search_date_max.strftime("%d/%m/%Y"),
-                "cl2000_comptes": '["%s"]' % subscribtion.id,
-                "cl200_typeRecherche": "ADVANCED",
-            }
-            self.bank_statement_search.go(data=data)
-
-            yield from self.page.iter_documents()
-
-            search_date_max = search_date_min - relativedelta(days=1)
-            counter += 1
 
     @need_login
     def iter_emitters(self):
