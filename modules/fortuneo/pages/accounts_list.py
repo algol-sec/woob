@@ -518,17 +518,13 @@ class LifeInsuranceTransactionApiPage(LoggedPage, JsonPage):
         class item(ItemElement):
             klass = Transaction
 
-            obj_date = Date(
-                CleanText(Dict("transactionCreationDate", default=None), default=NotAvailable), default=NotAvailable
-            )
-            obj_rdate = Date(
-                CleanText(Dict("transactionDate", default=None), default=NotAvailable), default=NotAvailable
-            )
+            obj_date = Date(Dict("transactionCreationDate", default=None), default=NotAvailable)
+            obj_rdate = Date(Dict("transactionDate", default=None), default=NotAvailable)
             obj_raw = CleanText(Dict("transactionLabel", default=NotAvailable))
             obj_label = CleanText(Dict("transactionLabel", default=NotAvailable))
             obj_amount = CleanDecimal.SI(Dict("transactionNetAmount"))
             obj_type = MapIn(
-                CleanText(Dict("transactionCode")),
+                Dict("transactionCode"),
                 {
                     # Distribution: coupon / dividend
                     "405": Transaction.TYPE_PROFIT,
@@ -551,9 +547,9 @@ class LifeInsuranceTransactionApiPage(LoggedPage, JsonPage):
             )
 
             def obj__details_link(self):
-                if Dict("availableDetailOperation", default=None)(self):
-                    return CleanText(Dict("transactionId"))(self)
-                return None
+                if Dict("availableDetailOperation", default=False)(self):
+                    return Dict("transactionId")(self) or NotAvailable
+                return NotAvailable
 
 
 class LifeInsuranceTransactionDetailApiPage(LoggedPage, JsonPage):
@@ -565,12 +561,12 @@ class LifeInsuranceTransactionDetailApiPage(LoggedPage, JsonPage):
     def _build_investment(self, fund, is_sale=False):
         inv = Investment()
         inv.label = CleanText(Dict("label"))(fund)
-        isin = CleanText(Dict("isinCode"))(fund)
+        isin = Dict("isinCode")(fund)
         inv.code = isin
         inv.code_type = "ISIN"
         inv.unitvalue = CleanDecimal.SI(Dict("netAssetValue"), default=NotAvailable)(fund)
         inv.valuation = CleanDecimal.SI(Dict("amount"), default=NotAvailable)(fund)
-        inv.vdate = Date(CleanText(Dict("valuationLastDate")), default=NotAvailable)(fund)
+        inv.vdate = Date(Dict("valuationLastDate"), default=NotAvailable)(fund)
 
         entry_shares = CleanDecimal.SI(Dict("entryShareNumber"), default=NotAvailable)(fund)
         if is_sale:
@@ -640,12 +636,11 @@ class LifeInsuranceTransactionDetailApiPage(LoggedPage, JsonPage):
             transaction._unitvalue = investments[0].unitvalue
 
         # Update the effective date when the detail provides one
-        rdate_str = self.doc.get("transactionDate")
-        if rdate_str:
+        if rdate_str := self.doc.get("transactionDate"):
             try:
                 transaction.rdate = datetime.fromisoformat(rdate_str).date()
-            except (ValueError, TypeError):
-                pass
+            except ValueError:
+                self.logger.debug("Could not parse the transaction date %s", rdate_str)
 
 
 class InvestmentHistoryPage(ActionNeededPage):

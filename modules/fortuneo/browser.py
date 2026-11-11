@@ -46,6 +46,7 @@ from woob.exceptions import (
     BrowserIncorrectPassword,
     BrowserQuestion,
     BrowserUnavailable,
+    ParseError,
 )
 from woob.tools.capabilities.bank.bank_transfer import sorted_transfers
 from woob.tools.capabilities.bank.investments import create_french_liquidity
@@ -178,10 +179,12 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
     api_life_insurance_transaction_detail = URL(
         r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>[^/]+)/transaction/(?P<transaction_id>.+)",
         LifeInsuranceTransactionDetailApiPage,
+        headers={"Accept": "application/json"},
     )
     api_life_insurance_transactions = URL(
         r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>[^/]+)/transaction",
         LifeInsuranceTransactionApiPage,
+        headers={"Accept": "application/json"},
     )
     api_investments_life_insurance = URL(
         r"/valorisation-assurance-vie/api/life-insurance/accounts/(?P<id>.+)", InvestmentApiPage
@@ -567,20 +570,16 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
 
             # Calling this URL sets a session cookie required by the life insurance APIs.
             self.set_cookies_api.go(data="")
-            self.api_life_insurance_transactions.go(
-                id=account_api_id,
-                headers={"Accept": "application/json"},
-            )
+            self.api_life_insurance_transactions.go(id=account_api_id)
             for tr in self.page.iter_history():
                 if tr._details_link:
                     try:
                         self.api_life_insurance_transaction_detail.go(
                             id=account_api_id,
                             transaction_id=tr._details_link,
-                            headers={"Accept": "application/json"},
                         )
                         self.page.fill_transaction_details(tr)
-                    except Exception as e:
+                    except (ClientError, ParseError) as e:
                         # The detail endpoint is optional: keep the transaction
                         # without its underlying investments.
                         self.logger.debug("Could not fetch details of transaction %s: %s", tr.label, e)

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from datetime import date
 from decimal import Decimal
@@ -30,7 +28,10 @@ def mock_json_response(url, payload):
 
 
 class TestLifeInsuranceTransactionApiPage(TestCase):
+    """Listing page: each JSON entry becomes a Transaction with a mapped type and a detail link when available."""
+
     def test_iter_history(self):
+        """A distribution is a profit and keeps its detail link, a partial surrender is a withdrawal without one."""
         data = {
             "transactionDetails": [
                 {
@@ -75,11 +76,14 @@ class TestLifeInsuranceTransactionApiPage(TestCase):
         surrender = transactions[1]
         self.assertEqual(surrender.amount, Decimal("-500.00"))
         self.assertEqual(surrender.type, Transaction.TYPE_WITHDRAWAL)
-        self.assertIsNone(surrender._details_link)
+        self.assertFalse(surrender._details_link)
 
 
 class TestLifeInsuranceTransactionDetailApiPage(TestCase):
+    """Detail page: the payload section depends on the operation kind and fills the transaction investments."""
+
     def test_fill_transaction_details_distribution(self):
+        """A distribution fills one investment per distributed fund and updates the transaction date."""
         data = {
             "transactionDate": "2026-03-15",
             "distribution": {
@@ -118,6 +122,7 @@ class TestLifeInsuranceTransactionDetailApiPage(TestCase):
         self.assertEqual(transaction.rdate, date(2026, 3, 15))
 
     def test_fill_transaction_details_reallocation(self):
+        """A reallocation yields a bought investment and a sold one, the sold quantity being negative."""
         data = {
             "reallocation": {
                 "ingoingFundsList": [
@@ -161,6 +166,7 @@ class TestLifeInsuranceTransactionDetailApiPage(TestCase):
         self.assertEqual(sold.valuation, Decimal("-500.00"))
 
     def test_fill_transaction_details_yearly_revaluation(self):
+        """A yearly revaluation uses the profit sharing amount of the revaluation object."""
         data = {
             "yearlyRevolarisation": {
                 "concernedFund": {
@@ -189,6 +195,7 @@ class TestLifeInsuranceTransactionDetailApiPage(TestCase):
         self.assertEqual(inv.quantity, Decimal("3"))
 
     def test_fill_transaction_details_yearly_revaluation_root_amount(self):
+        """When the revaluation object has no amount, the one at the root of the payload is used."""
         data = {
             "contractProfitSharingAmount": "88.00",
             "yearlyRevolarisation": {
@@ -215,6 +222,7 @@ class TestLifeInsuranceTransactionDetailApiPage(TestCase):
         self.assertEqual(transaction.investments[0].valuation, Decimal("88.00"))
 
     def test_fill_transaction_details_empty(self):
+        """A payload without any known section leaves the transaction without investments."""
         response = mock_json_response(
             "https://mabanque.fortuneo.fr/valorisation-assurance-vie/api/life-insurance/accounts/123/transaction/46",
             {},

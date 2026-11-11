@@ -71,7 +71,7 @@ class TestTransactionApiPage(TestCase):
         self.assertEqual(tr.vdate, date(2024, 1, 14))
         self.assertEqual(tr.rdate, date(2024, 1, 13))
         self.assertEqual(tr.raw, "VIR SEPA FROM CLIENT")
-        self.assertEqual(tr.label, "VIR FROM CLIENT")
+        self.assertEqual(tr.label, "SEPA FROM CLIENT")
         self.assertEqual(tr.amount, Decimal("-42.50"))
         self.assertIsNone(tr._details_link)
 
