@@ -474,7 +474,7 @@ class BankStatementPage(SGPEJsonPage):
                     d.label = "{} {}".format(relevesParDateEtAbonnements["libelle"], r["dateEdition"])
                     d.type = DocumentTypes.STATEMENT
                     d.format = "pdf"
-                    d.id = "{}_{}".format(relevesParDateEtAbonnements["iban"], r["dateEdition"].replace("/", ""))
+                    d.id = "{}_{}".format(relevesParDateEtAbonnements["iban"], r["identifiant"])
                     d.url = self.browser.pdf_page.build(ref_tech=quote_plus(r["sceau"]))
                     yield d
 
