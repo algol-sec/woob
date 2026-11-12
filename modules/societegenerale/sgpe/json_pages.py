@@ -439,7 +439,7 @@ class BankStatementPage(SGPEJsonPage):
         # So, if Bank statements are not available we don't want to break the run.
         if self.doc.get("commun", {}).get("statut").lower() == "nok":
             reason = self.doc.get("commun", {}).get("raison")
-            if reason == "SYD-RCE-UNAUTHORIZED-ACCESS":
+            if reason == ("SYD-RCE-UNAUTHORIZED-ACCESS", "Recherche sur un compte non autorisé"):
                 self.logger.warning("No subscriptions access rights granted: %s", reason)
                 return True
         return False

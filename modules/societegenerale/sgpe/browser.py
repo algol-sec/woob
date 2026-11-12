@@ -310,6 +310,8 @@ class SGPEBrowser(SocieteGeneraleLogin):
             }
             self.documents.go(**params)
             assert isinstance(self.page, BankStatementPage)
+            if self.page.is_document_disabled():
+                return  # Not authorized to search this account
             self.page.check_error()
 
             yield from sorted_documents(self.page.iter_documents())
