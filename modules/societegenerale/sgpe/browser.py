@@ -304,7 +304,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
         while search_date_min > subscription._subscription_date:
             # TODO: verify logic reaches subscription date.
             params = {
-                "prestationIdTechnique": quote_plus(subscription._internal_id),
+                "prestationIdTechnique": subscription._internal_id,
                 "dateDebut": search_date_min.strftime("%d/%m/%Y"),
                 "dateFin": search_date_max.strftime("%d/%m/%Y"),
             }
