@@ -18,7 +18,7 @@
 # flake8: compatible
 
 from base64 import b64encode
-from datetime import date, datetime
+from datetime import date
 from urllib.parse import quote_plus
 
 from dateutil.relativedelta import relativedelta
@@ -38,6 +38,7 @@ from woob.capabilities.bank import (
 from woob.capabilities.base import find_object
 from woob.exceptions import BrowserPasswordExpired, BrowserUnavailable
 from woob.tools.capabilities.bill.documents import sorted_documents
+from woob.tools.date import now_as_utc
 from woob.tools.decorators import retry
 from woob.tools.json import json
 from woob.tools.value import Value
@@ -298,8 +299,10 @@ class SGPEBrowser(SocieteGeneraleLogin):
         The website only allows to lookup documents in a 3 months range.
         List documents by iterating 3 months at a time in the past until the subscription date.
         """
-        search_date_max = datetime.today()
-        search_date_min = (search_date_max - relativedelta(months=3)).replace(day=1)
+        # Initial span is smaller than 3 months because we want to iterate by entire month
+        # and we cannot exceed present day.
+        search_date_max = now_as_utc().date()
+        search_date_min = (search_date_max - relativedelta(months=2)).replace(day=1)
 
         while search_date_min > subscription._subscription_date:
             # TODO: verify logic reaches subscription date.
