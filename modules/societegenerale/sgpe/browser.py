@@ -304,7 +304,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
         search_date_max = now_as_utc().date()
         search_date_min = (search_date_max - relativedelta(months=2)).replace(day=1)
 
-        while search_date_min > subscription._subscription_date:
+        while search_date_max > subscription._subscription_date:
             # TODO: verify logic reaches subscription date.
             params = {
                 "prestationIdTechnique": subscription._internal_id,
@@ -320,7 +320,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
             yield from sorted_documents(self.page.iter_documents())
 
             search_date_max = search_date_min - relativedelta(day=1)
-            search_date_min = search_date_max - relativedelta(months=3)
+            search_date_min = max(search_date_max - relativedelta(months=3), subscription._subscription_date)
 
 
 class SGEnterpriseBrowser(SGPEBrowser):
