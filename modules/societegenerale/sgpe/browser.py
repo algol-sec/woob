@@ -37,6 +37,7 @@ from woob.capabilities.bank import (
 )
 from woob.capabilities.base import find_object
 from woob.exceptions import BrowserPasswordExpired, BrowserUnavailable
+from woob.tools.capabilities.bill.documents import sorted_documents
 from woob.tools.decorators import retry
 from woob.tools.json import json
 from woob.tools.value import Value
@@ -311,7 +312,7 @@ class SGPEBrowser(SocieteGeneraleLogin):
             assert isinstance(self.page, BankStatementPage)
             self.page.check_error()
 
-            yield from self.page.iter_documents()
+            yield from sorted_documents(self.page.iter_documents())
 
             search_date_max = search_date_min - relativedelta(day=1)
             search_date_min = search_date_max - relativedelta(months=3)
