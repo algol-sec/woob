@@ -463,7 +463,7 @@ class BankStatementPage(SGPEJsonPage):
             obj_subscriber = Env("subscriber")
 
             obj__internal_id = Dict("prestationIdTechnique")
-            obj__subscription_date = Date(FromTimestamp(Dict("dateOuverture"), millis=True))
+            obj__subscription_date = FromTimestamp(Dict("dateOuverture"), millis=True)
 
     def iter_documents(self):
         for relevesParDateEtAbonnements in self.doc["donnees"]["relevesParDateEtAbonnements"]:

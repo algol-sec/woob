@@ -238,7 +238,7 @@ def test_pro_iter_documents(sg_pro_browser):
 
     account = Account("xyz=")
     account._internal_id = "xyz="
-    account._subscription_date = (now_as_utc() - timedelta(days=6 * 30)).date()
+    account._subscription_date = now_as_utc() - timedelta(days=6 * 30)
 
     # Successive calls payloads
     payloads = [
