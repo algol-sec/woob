@@ -558,7 +558,7 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             Account.TYPE_LOAN,
             Account.TYPE_MORTGAGE,
         ):
-            return
+            return []
 
         self.location(account._history_link)
 
@@ -566,11 +566,15 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
             account_api_id = self.page.get_account_api_id()
             if not account_api_id:
                 self.logger.warning("Could not find the API id of account %s", account.id)
-                return
+                return []
 
             # Calling this URL sets a session cookie required by the life insurance APIs.
             self.set_cookies_api.go(data="")
             self.api_life_insurance_transactions.go(id=account_api_id)
+            # Not a generator: a `yield` here would turn the whole method
+            # into one, silently dropping the lists returned by the other
+            # branches (checking accounts and PEA got no history at all).
+            transactions = []
             for tr in self.page.iter_history():
                 if tr._details_link:
                     try:
@@ -583,8 +587,8 @@ class FortuneoBrowser(OAuth2PKCEMixin, TwoFactorBrowser):
                         # The detail endpoint is optional: keep the transaction
                         # without its underlying investments.
                         self.logger.debug("Could not fetch details of transaction %s: %s", tr.label, e)
-                yield tr
-            return
+                transactions.append(tr)
+            return transactions
 
         if self.account_history.is_here():
             # Checking account: use REST API

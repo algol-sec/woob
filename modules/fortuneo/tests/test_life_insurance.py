@@ -251,3 +251,16 @@ class TestLifeInsuranceTransactionDetailApiPage(TestCase):
 
         self.assertEqual(transaction.investments, [])
         self.assertFalse(hasattr(transaction, "_code"))
+
+
+class BrowserIterHistoryTest(TestCase):
+    def test_iter_history_is_not_a_generator(self):
+        # A `yield` in the life insurance branch made iter_history a
+        # generator, so the lists returned for checking accounts and PEA
+        # were silently dropped: those accounts had no history at all.
+        import inspect
+
+        from ..browser import FortuneoBrowser
+
+        func = inspect.unwrap(FortuneoBrowser.iter_history)
+        self.assertFalse(inspect.isgeneratorfunction(func))
