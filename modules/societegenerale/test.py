@@ -27,8 +27,6 @@ import pytest
 from woob.capabilities import NotLoaded
 from woob.capabilities.bank import Account
 from woob.capabilities.profile import Person
-from woob.core import Woob
-from woob.tools.backend import Module
 from woob.tools.date import now_as_utc
 from woob.tools.test import BackendTest
 
@@ -175,13 +173,6 @@ class ListRelevesProentAuthsec(JSONFactory):
     caract = {}
 
 
-@pytest.fixture(scope="session")
-def sg_backend() -> Module:
-    woob = Woob()
-    woob.load_backends(modules=["societegenerale"])
-    return woob.build_backend("societegenerale")
-
-
 @pytest.fixture
 def sg_par_browser(faker) -> SocieteGenerale:
     config = {
@@ -193,8 +184,13 @@ def sg_par_browser(faker) -> SocieteGenerale:
 
 
 @pytest.fixture
-def sg_pro_browser(sg_backend) -> SGProfessionalBrowser:
-    return SGProfessionalBrowser({"login": "123", "password": "456789", "website": "pro"}, "123", "456789")
+def sg_pro_browser(faker) -> SGProfessionalBrowser:
+    config = {
+        "login": faker.bothify("########"),
+        "password": faker.bothify("######"),
+        "website": "pro",
+    }
+    return SGProfessionalBrowser(config, config["login"], config["password"])
 
 
 # Unittests
