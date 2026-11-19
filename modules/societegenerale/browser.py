@@ -306,7 +306,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
         data["oob_op"] = "auth"
         self.location("/sec/oob_auth.json", data=data)
 
-        if self.page.doc.get("commun", {}).get("statut").lower() == "nok":
+        if (self.page.doc.get("commun", {}).get("statut") or "").lower() == "nok":
             raise BrowserUnavailable()
 
         self.polling_transaction = None
@@ -328,7 +328,7 @@ class SocieteGeneraleTwoFactorBrowser(TwoFactorBrowser):
         }
         self.location("/sec/csa/check.json", data=data)
 
-        if self.page.doc.get("commun", {}).get("statut").lower() == "nok":
+        if (self.page.doc.get("commun", {}).get("statut") or "").lower() == "nok":
             raise BrowserIncorrectPassword("Le Code Sécurité est invalide")
 
         self.check_skippable_action_needed()

@@ -437,7 +437,7 @@ class BankStatementPage(SGPEJsonPage):
     def is_document_disabled(self):
         # If e-document is not activated by the account owner, we have this specific response.
         # So, if Bank statements are not available we don't want to break the run.
-        if self.doc.get("commun", {}).get("statut").lower() == "nok":
+        if (self.doc.get("commun", {}).get("statut") or "").lower() == "nok":
             reason = self.doc.get("commun", {}).get("raison")
             if reason == ("SYD-RCE-UNAUTHORIZED-ACCESS", "Recherche sur un compte non autorisé"):
                 self.logger.warning("No subscriptions access rights granted: %s", reason)
@@ -445,7 +445,7 @@ class BankStatementPage(SGPEJsonPage):
         return False
 
     def check_error(self):
-        if self.doc.get("commun", {}).get("statut").lower() == "nok":
+        if (self.doc.get("commun", {}).get("statut") or "").lower() == "nok":
             reason = self.doc.get("commun", {}).get("raison")
             if reason == "oob_insc_oblig":
                 raise AuthMethodNotImplemented("L'authentification par Secure Access n'est pas prise en charge")

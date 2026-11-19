@@ -628,6 +628,8 @@ def parse_outgoing_transfer_transaction(line: str | None) -> dict[str, str | BIC
         tr_data["POUR"] = m["recipient"]
         bankid = m["bankid"]
 
+    # Without CHEZ there is no BIC (``bic`` would be unbound) to rebuild the IBAN from.
+    if m and not empty(tr_data["BIC"]):
         if bankid and not bankid.isnumeric():
             bankid = bic.domestic_bank_codes[0]
 
@@ -777,7 +779,9 @@ class TransactionItemElement(ItemElement):
                 )
                 recipient = Recipient()
                 recipient.iban = m["IBAN"]
-                recipient.id = str(m["IBAN"])
+                if not empty(m["IBAN"]):
+                    # str(NotAvailable) would give the id "Not available"
+                    recipient.id = str(m["IBAN"])
                 recipient.label = m["POUR"]
                 # On societe generale recipients are immediatly available.
                 recipient.enabled_at = datetime.datetime.now().replace(microsecond=0)
